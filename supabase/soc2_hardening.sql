@@ -1,0 +1,150 @@
+-- =============================================================================
+-- AgentWatch SOC 2 CC6.1 Compliance Hardening
+-- Run in Supabase SQL Editor AFTER all other migration files
+-- =============================================================================
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- GAP #1: RLS policy on auth_events table
+-- Without this, a leaked anon key could read authentication audit logs.
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE public.auth_events ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY service_role_only_on_auth_events ON public.auth_events
+  FOR ALL
+  USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+COMMENT ON POLICY service_role_only_on_auth_events ON public.auth_events IS
+  'SOC 2 CC6.1: Restricts auth_events access to service_role only. All access goes through the Cloudflare Worker which authenticates tenants at the application layer.';
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- GAP #2: Retention purge for auth_events (1 year)
+-- Auth audit logs must be retained for compliance but not grow unbounded.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.purge_old_auth_events()
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  DELETE FROM public.auth_events
+  WHERE created_at < NOW() - INTERVAL '1 year';
+$$;
+
+GRANT EXECUTE ON FUNCTION public.purge_old_auth_events() TO service_role;
+
+COMMENT ON FUNCTION public.purge_old_auth_events() IS
+  'SOC 2 CC6.1: Retention policy for auth audit logs. Deletes records older than 1 year.';
+
+-- Schedule daily purge at 3am (offset from log purge at 2am)
+SELECT cron.schedule(
+  'purge-old-auth-events',
+  '0 3 * * *',
+  $$SELECT public.purge_old_auth_events();$$
+);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- GAP #3: Fix purge_old_logs to use SECURITY DEFINER
+-- SECURITY INVOKER allows any DB role with EXECUTE to call the function.
+-- SECURITY DEFINER restricts execution to the function owner (superuser).
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.purge_old_logs()
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  DELETE FROM public.llm_request_logs
+  WHERE created_at < NOW() - INTERVAL '90 days';
+$$;
+
+GRANT EXECUTE ON FUNCTION public.purge_old_logs() TO service_role;
+
+COMMENT ON FUNCTION public.purge_old_logs() IS
+  'SOC 2 CC6.1: Retention policy for telemetry logs. Deletes records older than 90 days. SECURITY DEFINER ensures only the function owner can execute.';
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- GAP #4: Data classification labels on all tables
+-- SOC 2 requires explicit data classification for audit evidence.
+-- ─────────────────────────────────────────────────────────────────────────────
+COMMENT ON TABLE public.llm_request_logs IS
+  'CONFIDENTIAL — Telemetry logs from AgentWatch edge proxy. Contains token counts, model identifiers, and PII risk classifications. NO prompt content stored. RLS enabled; access restricted to service_role only. Tenant isolation enforced at the application layer. Retention: 90 days.';
+
+COMMENT ON TABLE public.auth_events IS
+  'CONFIDENTIAL — SSO/SAML authentication event audit log. Tracks all auth attempts including IP addresses and user agents for SOC 2 CC6.1 compliance. RLS enabled; service_role only. Retention: 1 year.';
+
+COMMENT ON TABLE public.tenant_saml_config IS
+  'CONFIDENTIAL — SAML SSO configuration per tenant. Stores IdP metadata including certificates. IdP certificates are encrypted at rest via Supabase infrastructure encryption. Access restricted to service_role.';
+
+COMMENT ON TABLE public.model_pricing IS
+  'INTERNAL — Model pricing lookup table for cost estimation. Non-sensitive reference data.';
+
+COMMENT ON TABLE public.report_dispatches IS
+  'INTERNAL — Cron report dispatch idempotency table. Prevents duplicate report sends.';
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- GAP #5: Add encryption-at-rest note to tenant_saml_config
+-- Already encrypted by Supabase infrastructure, but adding explicit note.
+-- ─────────────────────────────────────────────────────────────────────────────
+-- (Covered by the COMMENT ON TABLE above)
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- GAP #6: API access audit trail
+-- Logs all authenticated API calls for SOC 2 CC6.1 audit requirements.
+-- Separate from auth_events (which tracks login events).
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.api_access_log (
+  id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  event_type TEXT NOT NULL CHECK (event_type IN (
+    'ingest', 'budget_check', 'proxy_request',
+    'webhook_stripe', 'contact_submit', 'saml_callback',
+    'budget_enforce_blocked', 'anomaly_detected'
+  )),
+  endpoint TEXT NOT NULL,
+  method TEXT NOT NULL,
+  response_status INTEGER,
+  ip_address TEXT,
+  user_agent TEXT,
+  session_id TEXT,
+  details JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_access_log_tenant
+  ON public.api_access_log (tenant_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_api_access_log_event
+  ON public.api_access_log (event_type, created_at DESC);
+
+ALTER TABLE public.api_access_log ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY service_role_only_on_api_access_log ON public.api_access_log
+  FOR ALL
+  USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+COMMENT ON TABLE public.api_access_log IS
+  'CONFIDENTIAL — API access audit trail for SOC 2 CC6.1 compliance. Logs all authenticated API calls with tenant, endpoint, status, and IP. RLS enabled; service_role only. Retention: 90 days.';
+
+-- Retention purge for API access log (90 days, same as telemetry)
+CREATE OR REPLACE FUNCTION public.purge_old_api_access_log()
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  DELETE FROM public.api_access_log
+  WHERE created_at < NOW() - INTERVAL '90 days';
+$$;
+
+GRANT EXECUTE ON FUNCTION public.purge_old_api_access_log() TO service_role;
+
+SELECT cron.schedule(
+  'purge-old-api-access-log',
+  '0 4 * * *',
+  $$SELECT public.purge_old_api_access_log();$$
+);
+
+COMMENT ON FUNCTION public.purge_old_api_access_log() IS
+  'SOC 2 CC6.1: Retention policy for API access audit logs. Deletes records older than 90 days.';

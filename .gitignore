@@ -1,0 +1,13 @@
+node_modules/
+.wrangler/
+dist/
+.DS_Store
+__pycache__/
+*.py[cod]
+coverage/
+.env
+.env.*
+.dev.vars
+*.log
+npm-debug.log*
+SECRETS.md

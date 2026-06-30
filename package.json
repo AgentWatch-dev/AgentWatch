@@ -1,0 +1,55 @@
+{
+  "name": "agentwatch",
+  "version": "1.0.1",
+  "type": "module",
+  "scripts": {
+    "generate:pricing": "node scripts/generate-pricing.cjs",
+    "dev": "wrangler dev",
+    "predeploy": "rm -rf assets/* && cd website && npm run build && cd .. && cp -r website/dist/* assets/",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "docs:build": "vitepress build docs",
+    "format": "prettier --write .",
+    "lint": "eslint src/ --ext .ts",
+    "lint:fix": "eslint src/ --ext .ts --fix"
+  },
+  "dependencies": {
+    "aws4fetch": "^1.0.20",
+    "js-tiktoken": "^1.0.20"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.16.15",
+    "@cloudflare/workers-types": "^4.20260609.1",
+    "@eslint/js": "^10.0.1",
+    "@typescript-eslint/eslint-plugin": "^8.62.1",
+    "@typescript-eslint/parser": "^8.62.1",
+    "@vitest/coverage-istanbul": "^4.1.9",
+    "eslint": "^10.6.0",
+    "eslint-config-prettier": "^10.1.8",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.9.3",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.62.1",
+    "vitepress": "^1.6.4",
+    "vitest": "^4.1.8",
+    "vue": "^3.5.38",
+    "wrangler": "^4.99.0"
+  },
+  "description": "Runtime governance for AI agents — budget enforcement, loop detection, and compliance at the edge",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AgentWatch-dev/agentwatch.git"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "llm",
+    "ai-agents",
+    "budget",
+    "governance",
+    "proxy",
+    "cloudflare"
+  ]
+}
