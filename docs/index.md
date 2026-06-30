@@ -1,6 +1,6 @@
 ---
-title: "Introduction"
-description: "Welcome to the AgentWatch Documentation"
+title: 'Introduction'
+description: 'Welcome to the AgentWatch Documentation'
 ---
 
 # AgentWatch
@@ -24,7 +24,7 @@ Iteration 50:  250,000 tokens → $0.750
 Iteration 100: 1,000,000 tokens → $3.000
 ```
 
-Passive monitoring tools only report this *after* the budget is gone. AgentWatch prevents it *before* the call is made.
+Passive monitoring tools only report this _after_ the budget is gone. AgentWatch prevents it _before_ the call is made.
 
 ## The Solution
 
@@ -64,30 +64,30 @@ If AgentWatch infrastructure experiences downtime, budget checks silently fail o
 
 ## Key Features
 
-| Feature | Description |
-|---------|-------------|
-| **Session Tracking** | Global state tracked across your entire agent network via sub-1ms Cloudflare KV edge storage |
-| **Budget Enforcement** | Synchronous pre-call budget ceiling check. Drops requests instantly if limits are exceeded |
-| **Anomaly Detection** | Identifies the 1.2x consecutive context-growth signature of a stuck loop (Pro/Enterprise) |
-| **Fail-Open** | AgentWatch downtime never causes customer outages |
-| **10 Providers** | OpenAI, Anthropic, Groq, xAI, Gemini, Azure, Bedrock, Xiaomi, Mistral, Cohere — all supported |
-| **SOC 2 CC6.1** | Compliance telemetry reports with audit-ready summaries |
-| **Team Budgets** | Monthly USD caps per team with hard-stop enforcement |
+| Feature                | Description                                                                                   |
+| ---------------------- | --------------------------------------------------------------------------------------------- |
+| **Session Tracking**   | Global state tracked across your entire agent network via sub-1ms Cloudflare KV edge storage  |
+| **Budget Enforcement** | Synchronous pre-call budget ceiling check. Drops requests instantly if limits are exceeded    |
+| **Anomaly Detection**  | Identifies the 1.2x consecutive context-growth signature of a stuck loop (Pro/Enterprise)     |
+| **Fail-Open**          | AgentWatch downtime never causes customer outages                                             |
+| **10 Providers**       | OpenAI, Anthropic, Groq, xAI, Gemini, Azure, Bedrock, Xiaomi, Mistral, Cohere — all supported |
+| **SOC 2 CC6.1**        | Compliance telemetry reports with audit-ready summaries                                       |
+| **Team Budgets**       | Monthly USD caps per team with hard-stop enforcement                                          |
 
 ## Supported Providers
 
-| Provider | Status |
-|----------|--------|
-| OpenAI | Supported |
-| Anthropic | Supported |
-| Groq | Supported |
-| xAI (Grok) | Supported |
-| Gemini | Supported |
+| Provider     | Status    |
+| ------------ | --------- |
+| OpenAI       | Supported |
+| Anthropic    | Supported |
+| Groq         | Supported |
+| xAI (Grok)   | Supported |
+| Gemini       | Supported |
 | Azure OpenAI | Supported |
-| AWS Bedrock | Supported |
-| Xiaomi MiMo | Supported |
-| Mistral | Supported |
-| Cohere | Supported |
+| AWS Bedrock  | Supported |
+| Xiaomi MiMo  | Supported |
+| Mistral      | Supported |
+| Cohere       | Supported |
 
 ## Architecture
 
@@ -95,16 +95,16 @@ AgentWatch runs on Cloudflare's global edge infrastructure:
 
 ```
 ┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  Any App or  │────▶│  Cloudflare Edge  │────▶│  LLM Provider│
-│  CLI Agent   │   │  (AgentWatch)    │     │  (OpenAI,    │
-└─────────────┘     └──────────────────┘     │   Anthropic) │
-                            │                 └─────────────┘
+│  Any App or │────▶│  Cloudflare Edge │────▶│ LLM Provider│
+│  CLI Agent  │     │  (AgentWatch)    │     │ (OpenAI,    │
+└─────────────┘     └──────────────────┘     │  Anthropic) │
+                            │                └─────────────┘
                             │ KV (session state)
                             │ Queue (telemetry buffer)
                             ▼
                     ┌──────────────────┐
-                    │    Supabase       │
-                    │  (Postgres logs)  │
+                    │    Supabase      │
+                    │  (Postgres logs) │
                     └──────────────────┘
 ```
 

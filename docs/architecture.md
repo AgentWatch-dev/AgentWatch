@@ -6,7 +6,7 @@ AgentWatch is an edge proxy built on Cloudflare Workers that provides runtime go
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Your Application                      │
+│                        Your Application                     │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │  Standard SDK (OpenAI / Anthropic / any provider)   │    │
 │  │  ├── HTTP Request formatting                        │    │
@@ -16,35 +16,35 @@ AgentWatch is an edge proxy built on Cloudflare Workers that provides runtime go
                             │ HTTPS
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  Cloudflare Edge Network                     │
+│                  Cloudflare Edge Network                    │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │  AgentWatch Worker                                   │    │
-│  │  ├── Authentication (Bearer token + BYOK)            │    │
-│  │  ├── Rate limiting (per-tenant, native binding)      │    │
-│  │  ├── Budget check (KV lookup + Durable Object)       │    │
-│  │  ├── Rule evaluation (custom anomaly rules)          │    │
-│  │  ├── Data residency routing (EU/US/APAC)             │    │
-│  │  ├── Proxy routing (10 providers)                    │    │
-│  │  ├── Stream budget enforcement (mid-generation)      │    │
-│  │  └── Telemetry ingestion → Queue → Supabase          │    │
+│  │  AgentWatch Worker                                  │    │
+│  │  ├── Authentication (Bearer token + BYOK)           │    │
+│  │  ├── Rate limiting (per-tenant, native binding)     │    │
+│  │  ├── Budget check (KV lookup + Durable Object)      │    │
+│  │  ├── Rule evaluation (custom anomaly rules)         │    │
+│  │  ├── Data residency routing (EU/US/APAC)            │    │
+│  │  ├── Proxy routing (10 providers)                   │    │
+│  │  ├── Stream budget enforcement (mid-generation)     │    │
+│  │  └── Telemetry ingestion → Queue → Supabase         │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                                                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │  Cloudflare   │  │  Durable     │  │  Cloudflare  │      │
-│  │  KV           │  │  Objects     │  │  Queues      │      │
-│  │  (session     │  │  (atomic     │  │  (telemetry  │      │
-│  │   state)      │  │   counters)  │  │   buffer)    │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │  Cloudflare  │  │  Durable     │  │  Cloudflare  │       │
+│  │  KV          │  │  Objects     │  │  Queues      │       │
+│  │  (session    │  │  (atomic     │  │  (telemetry  │       │
+│  │   state)     │  │   counters)  │  │   buffer)    │       │
+│  └──────────────┘  └──────────────┘  └──────────────┘       │
 └─────────────────────────────────────────────────────────────┘
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                     Supabase (Postgres)                       │
-│  ├── llm_request_logs (telemetry)                            │
-│  ├── developer_keys (API key management)                     │
-│  ├── audit_logs (security audit trail)                       │
-│  ├── tenant_rules (custom rules engine)                      │
-│  └── tenant_settings (per-tenant configuration)              │
+│                     Supabase (Postgres)                     │
+│  ├── llm_request_logs (telemetry)                           │
+│  ├── developer_keys (API key management)                    │
+│  ├── audit_logs (security audit trail)                      │
+│  ├── tenant_rules (custom rules engine)                     │
+│  └── tenant_settings (per-tenant configuration)             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -63,8 +63,8 @@ The Worker receives the request and executes:
 3. **Rule evaluation** — Custom anomaly rules from tenant configuration
 4. **Data residency** — Check `x-agentwatch-residency` header and route to EU endpoints if needed
 5. **Proxy routing** — Route to the correct upstream provider
-7. **Response forwarding** — Stream response back to SDK
-8. **Stream monitoring** — If streaming, monitor token usage and terminate if budget exceeded
+6. **Response forwarding** — Stream response back to SDK
+7. **Stream monitoring** — If streaming, monitor token usage and terminate if budget exceeded
 
 ### 3. Asynchronous Telemetry
 
@@ -79,19 +79,23 @@ After the response is returned:
 ## Key Components
 
 ### Worker (`src/index.ts`)
+
 The main Cloudflare Worker that handles all request routing, authentication, budget enforcement, and proxy forwarding. ~4,700 lines.
 
 ### Durable Objects
+
 - **SessionTracker** (`src/session_do.ts`) — Tracks per-session token usage and detects runaway loops (50 request threshold)
 - **TenantBalance** (`src/balance_do.ts`) — Atomic balance management for per-tenant billing
 
 ### KV Storage
+
 - `tenant:token:{token}` — Token-to-tenant mapping
 - `tenant:plan:{tenantId}` — Plan and subscription status
 - `t:{tenantId}:s:{sessionId}:usd` — Per-session USD spend
 - `t:{tenantId}:s:{sessionId}:tokens` — Per-session token count
 
 ### Supabase Database
+
 - `llm_request_logs` — Request telemetry (90-day retention)
 - `developer_keys` — API key metadata
 - `audit_logs` — Security audit trail
@@ -108,18 +112,21 @@ The main Cloudflare Worker that handles all request routing, authentication, bud
 ## Design Decisions
 
 ### Why a proxy instead of middleware?
+
 - Zero code changes for users (just change BASE_URL)
 - Language agnostic (works with any HTTP client)
 - Edge enforcement (sub-10ms at Cloudflare's edge)
 - No vendor lock-in (remove by changing URL back)
 
 ### Why Cloudflare Workers?
+
 - Global edge deployment (200+ locations)
 - Sub-millisecond cold starts
 - Built-in KV, Durable Objects, Queues
 - No server management
 
 ### Why Supabase?
+
 - Managed PostgreSQL with real-time capabilities
 - Row-Level Security for tenant isolation
 - RPC functions for complex queries
