@@ -10,7 +10,7 @@ Runtime governance for AI agents. Budget enforcement, loop detection, and compli
 
 AgentWatch is an edge proxy that sits between your application and LLM providers (OpenAI, Anthropic, Groq, xAI, Gemini, Azure, Bedrock). It enforces budget constraints, detects runaway agent loops, and provides compliance telemetry — all with sub-10ms latency.
 
-**The problem:** Autonomous AI agents can get stuck in recursive loops, burning thousands of dollars before a human intervenes. Traditional monitoring tools report this *after* the damage is done. AgentWatch prevents it *before* the call is made.
+**The problem:** Autonomous AI agents can get stuck in recursive loops, burning thousands of dollars before a human intervenes. Traditional monitoring tools report this _after_ the damage is done. AgentWatch prevents it _before_ the call is made.
 
 ## Features
 
@@ -61,16 +61,16 @@ curl -X POST http://localhost:8787/v1/proxy/openai/v1/chat/completions \
 
 ```
 ┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  Your App    │────▶│  AgentWatch Edge  │────▶│  LLM Provider│
-│              │     │  (Budget Check)   │     │  (OpenAI,    │
-└─────────────┘     └──────────────────┘     │   Anthropic)  │
-                            │                 └─────────────┘
+│  Your App   │────▶│  AgentWatch Edge │────▶│ LLM Provider│
+│             │     │  (Budget Check)  │     │  (OpenAI,   │
+└─────────────┘     └──────────────────┘     │   Anthropic)│
+                            │                └─────────────┘
                             │ KV (session state)
                             │ Queue (telemetry)
                             ▼
                     ┌──────────────────┐
-                    │    Supabase       │
-                    │  (Audit logs)     │
+                    │    Supabase      │
+                    │  (Audit logs)    │
                     └──────────────────┘
 ```
 
@@ -84,14 +84,14 @@ curl -X POST http://localhost:8787/v1/proxy/openai/v1/chat/completions \
 
 ### Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `SUPABASE_URL` | Yes | Supabase project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Supabase admin key |
-| `TENANT_TOKEN_MAP` | Yes | JSON map of tokens to tenant IDs |
-| `ADMIN_SECRET` | Yes | Admin endpoint authentication |
-| `OPENAI_API_KEY` | Yes | Your OpenAI API key |
-| `RATE_LIMITER` | No | Cloudflare RateLimiter binding |
+| Variable                    | Required | Description                      |
+| --------------------------- | -------- | -------------------------------- |
+| `SUPABASE_URL`              | Yes      | Supabase project URL             |
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes      | Supabase admin key               |
+| `TENANT_TOKEN_MAP`          | Yes      | JSON map of tokens to tenant IDs |
+| `ADMIN_SECRET`              | Yes      | Admin endpoint authentication    |
+| `OPENAI_API_KEY`            | Yes      | Your OpenAI API key              |
+| `RATE_LIMITER`              | No       | Cloudflare RateLimiter binding   |
 
 ### Session Budgets
 
@@ -136,18 +136,18 @@ See [ARCHITECTURE.md](docs/architecture.md) for the full system design.
 
 ## Supported Providers
 
-| Provider | Status |
-|----------|--------|
-| OpenAI | ✅ |
-| Anthropic | ✅ |
-| Groq | ✅ |
-| xAI (Grok) | ✅ |
-| Gemini | ✅ |
-| Azure OpenAI | ✅ |
-| AWS Bedrock | ✅ |
-| Xiaomi MiMo | ✅ |
-| Mistral | ✅ |
-| Cohere | ✅ |
+| Provider     | Status |
+| ------------ | ------ |
+| OpenAI       | ✅     |
+| Anthropic    | ✅     |
+| Groq         | ✅     |
+| xAI (Grok)   | ✅     |
+| Gemini       | ✅     |
+| Azure OpenAI | ✅     |
+| AWS Bedrock  | ✅     |
+| Xiaomi MiMo  | ✅     |
+| Mistral      | ✅     |
+| Cohere       | ✅     |
 
 ## Testing
 
