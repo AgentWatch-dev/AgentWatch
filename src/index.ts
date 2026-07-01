@@ -10,7 +10,7 @@ import { robotsTxt, sitemapXml, logoSocialSvg, faviconSvg } from "./seo";
 import { evaluateRules, parseRulesFromJson, type TenantRule, type RequestContext, type RuleEvaluationResult } from "./rules";
 import { generateReportHtml, generateSoc2Export, type ComplianceReport, type Soc2Export } from "./compliance";
 import { getResidencyForProvider, shouldBlockForResidency, parseResidencyFromJson, type ResidencyConfig } from "./residency";
-import { calculateCost, EXACT_MATCH_PRICING } from "./pricing";
+import { calculateCost, EXACT_MATCH_PRICING, FUZZY_MATCH_PRICING } from "./pricing";
 import { escapeHtml } from "./utils";
 
 import { AwsClient } from "aws4fetch";
@@ -1563,6 +1563,62 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
         limit_usd: limitUsd,
         cumulative_tokens: currentTotalTokens
       }), { status: 200, headers: { "content-type": "application/json", ...corsHeaders(env) } });
+    }
+
+    if (request.method === "POST" && pathname === "/v1/estimate-cost") {
+      let body: Record<string, unknown>;
+      try { body = await request.json() as Record<string, unknown>; } catch { return jsonError(400, "Invalid JSON body"); }
+
+      const model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : null;
+      if (!model) return jsonError(400, "model is required");
+
+      let promptTokens = typeof body.prompt_tokens === "number" && Number.isFinite(body.prompt_tokens) && body.prompt_tokens >= 0 ? Math.floor(body.prompt_tokens) : -1;
+      let completionTokens = typeof body.completion_tokens === "number" && Number.isFinite(body.completion_tokens) && body.completion_tokens >= 0 ? Math.floor(body.completion_tokens) : -1;
+
+      if (promptTokens < 0 && Array.isArray(body.messages)) {
+        promptTokens = estimateMessagesTokens(body.messages, model);
+      }
+      if (promptTokens < 0 && typeof body.prompt === "string") {
+        promptTokens = estimateTextTokens(body.prompt, model);
+      }
+      if (promptTokens < 0) promptTokens = 0;
+      if (completionTokens < 0) completionTokens = 0;
+
+      let pricing = EXACT_MATCH_PRICING[model];
+      let matchedVia: string | null = null;
+      if (!pricing) {
+        for (const rule of FUZZY_MATCH_PRICING) {
+          if (rule.operator === "includes" && model.includes(rule.model)) { pricing = rule; matchedVia = `includes:${rule.model}`; break; }
+          if (rule.operator === "startsWith" && model.startsWith(rule.model)) { pricing = rule; matchedVia = `startsWith:${rule.model}`; break; }
+        }
+      } else {
+        matchedVia = "exact";
+      }
+
+      const promptCost = pricing ? (promptTokens / 1_000_000) * pricing.prompt : 0;
+      const completionCost = pricing ? (completionTokens / 1_000_000) * pricing.completion : 0;
+
+      return Response.json({
+        model,
+        price_found: !!pricing,
+        matched_via: matchedVia,
+        pricing: pricing ? {
+          prompt_cost_per_1m: pricing.prompt,
+          completion_cost_per_1m: pricing.completion,
+          prompt_cache_write_per_1m: pricing.prompt_cache_write,
+          prompt_cache_read_per_1m: pricing.prompt_cache_read,
+        } : null,
+        cost: {
+          prompt: Number(promptCost.toFixed(10)),
+          completion: Number(completionCost.toFixed(10)),
+          total: Number((promptCost + completionCost).toFixed(10)),
+        },
+        tokens: {
+          prompt: promptTokens,
+          completion: completionTokens,
+          total: promptTokens + completionTokens,
+        },
+      }, { status: 200, headers: { "content-type": "application/json", ...corsHeaders(env) } });
     }
 
     if (pathname === "/docs") {
