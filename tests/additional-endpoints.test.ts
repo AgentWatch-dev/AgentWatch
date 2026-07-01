@@ -278,6 +278,129 @@ describe("Newsletter endpoint", () => {
   });
 });
 
+describe("Cost estimation endpoint", () => {
+  it("should estimate cost with explicit token counts", async () => {
+    const res = await call("/v1/estimate-cost", {
+      method: "POST",
+      body: { model: "gpt-4o", prompt_tokens: 1000, completion_tokens: 500 },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.model).toBe("gpt-4o");
+    expect(body.price_found).toBe(true);
+    expect(body.matched_via).toBe("exact");
+    expect(body.pricing.prompt_cost_per_1m).toBe(2.5);
+    expect(body.pricing.completion_cost_per_1m).toBe(10);
+    expect(body.tokens.prompt).toBe(1000);
+    expect(body.tokens.completion).toBe(500);
+    expect(body.tokens.total).toBe(1500);
+    expect(body.cost.prompt).toBeCloseTo(0.0025, 6);
+    expect(body.cost.completion).toBeCloseTo(0.005, 6);
+    expect(body.cost.total).toBeCloseTo(0.0075, 6);
+  });
+
+  it("should auto-estimate tokens from messages array", async () => {
+    const res = await call("/v1/estimate-cost", {
+      method: "POST",
+      body: { model: "gpt-4o", messages: [{ role: "user", content: "Hello" }] },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.price_found).toBe(true);
+    expect(body.tokens.prompt).toBeGreaterThan(0);
+    expect(body.tokens.completion).toBe(0);
+  });
+
+  it("should auto-estimate tokens from prompt string", async () => {
+    const res = await call("/v1/estimate-cost", {
+      method: "POST",
+      body: { model: "gpt-4o-mini", prompt: "Hello world this is a test prompt with some words" },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.price_found).toBe(true);
+    expect(body.tokens.prompt).toBeGreaterThan(0);
+  });
+
+  it("should combine messages with explicit completion_tokens", async () => {
+    const res = await call("/v1/estimate-cost", {
+      method: "POST",
+      body: { model: "claude-sonnet-4-6", messages: [{ role: "user", content: "Hi" }], completion_tokens: 200 },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.price_found).toBe(true);
+    expect(body.tokens.prompt).toBeGreaterThan(0);
+    expect(body.tokens.completion).toBe(200);
+  });
+
+  it("should return 400 when model is missing", async () => {
+    const res = await call("/v1/estimate-cost", {
+      method: "POST",
+      body: { prompt_tokens: 100 },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("should return 400 for invalid JSON", async () => {
+    const req = makeRequest("POST", "/v1/estimate-cost", {
+      headers: { "Content-Type": "application/json" },
+      body: "not-json",
+    });
+    const res = await worker.fetch(req, env, ctx);
+    expect(res.status).toBe(400);
+  });
+
+  it("should return 200 with price_found false for unknown model", async () => {
+    const res = await call("/v1/estimate-cost", {
+      method: "POST",
+      body: { model: "nonexistent-model-foo-123" },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.price_found).toBe(false);
+    expect(body.pricing).toBeNull();
+    expect(body.cost.total).toBe(0);
+  });
+
+  it("should handle negative token values by treating as 0", async () => {
+    const res = await call("/v1/estimate-cost", {
+      method: "POST",
+      body: { model: "gpt-4o", prompt_tokens: -100, completion_tokens: -50 },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.tokens.prompt).toBe(0);
+    expect(body.tokens.completion).toBe(0);
+  });
+
+  it("should return 200 with 0 tokens when only model is given", async () => {
+    const res = await call("/v1/estimate-cost", {
+      method: "POST",
+      body: { model: "gpt-4o" },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.tokens.prompt).toBe(0);
+    expect(body.tokens.completion).toBe(0);
+    expect(body.cost.total).toBe(0);
+    expect(body.price_found).toBe(true);
+  });
+
+  it("should fuzzy-match model names", async () => {
+    const res = await call("/v1/estimate-cost", {
+      method: "POST",
+      body: { model: "gpt-4o-realtime-preview", prompt_tokens: 1000 },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.price_found).toBe(true);
+    expect(body.matched_via).toBe("includes:gpt-4o-realtime");
+    expect(body.pricing.prompt_cost_per_1m).toBe(5);
+    expect(body.cost.prompt).toBe(0.005);
+  });
+});
+
 describe("Onboarding page", () => {
   it("should return 200 with HTML content", async () => {
     const res = await call("/onboarding");
