@@ -1,15 +1,19 @@
 import { Tiktoken } from "js-tiktoken/lite";
 import cl100kBase from "js-tiktoken/ranks/cl100k_base";
 import o200kBase from "js-tiktoken/ranks/o200k_base";
-import { analyzePayload } from "./classifier";
+import { analyzePayload, shouldBlockOnPii } from "./classifier";
 import { handleScheduled } from "./cron";
 import { dashboardHtml } from "./dashboard";
 import { demoHtml } from "./demo";
 import { loginHtml } from "./login";
 import { robotsTxt, sitemapXml, logoSocialSvg, faviconSvg } from "./seo";
+import { getOnboardingHtml } from "./onboarding";
+import { getContactEmailHtml, getProvisionEmailHtml, buildWelcomeEmail } from "./emails";
+import { type UptimeRecord } from "./sla";
 import { evaluateRules, parseRulesFromJson, type TenantRule, type RequestContext, type RuleEvaluationResult } from "./rules";
 import { generateReportHtml, generateSoc2Export, type ComplianceReport, type Soc2Export } from "./compliance";
 import { getResidencyForProvider, shouldBlockForResidency, parseResidencyFromJson, type ResidencyConfig } from "./residency";
+import { generateAuthnRequest, parseSamlResponse, mapSubjectToTenant, type SamlConfig } from "./saml";
 import { calculateCost, EXACT_MATCH_PRICING, FUZZY_MATCH_PRICING } from "./pricing";
 import { escapeHtml } from "./utils";
 
@@ -18,6 +22,7 @@ import { AwsClient } from "aws4fetch";
 import { type Provider, type Env } from "./types";
 export { SessionTracker } from "./session_do";
 export { TenantBalance } from "./balance_do";
+export { BudgetTracker } from "./budget_do";
 
 async function dispatchTenantWebhook(env: Env, tenantId: string, slackPayload: string) {
   const tenantWebhook = await env.KV.get(`tenant:slack_webhook:${tenantId}`);
@@ -54,6 +59,17 @@ interface RouteMatch {
   upstreamUrl: string;
 }
 
+interface AuthResponse {
+  user?: { id?: string };
+  id?: string;
+}
+
+interface PlanData {
+  plan: string;
+  fallback_policy?: "fail_open" | "fail_closed";
+  currentPeriodEnd?: string;
+}
+
 interface CapturedPayload {
   json: unknown;
   rawText: string;
@@ -65,7 +81,7 @@ interface Usage {
   completionTokens?: number;
 }
 
-async function writeAuditLog(env: Env, tenantId: string, action: string, actor: string, resource: string, status: "SUCCESS" | "FAILED" | "BLOCKED", metadata?: Record<string, any>) {
+async function writeAuditLog(env: Env, tenantId: string, action: string, actor: string, resource: string, status: "SUCCESS" | "FAILED" | "BLOCKED", metadata?: Record<string, unknown>) {
   const auditLogId = crypto.randomUUID();
   const ts = new Date().toISOString();
   const auditKey = `audit:${tenantId}:${Date.now()}_${auditLogId}`;
@@ -169,8 +185,6 @@ const worker: ExportedHandler<Env> = {
     }
 
     try {
-    const pathname = url.pathname;
-
     // Normalize pathname — strip trailing slashes (but not root "/")
     const rawPathname = url.pathname;
     const normalizedPathname = rawPathname === "/" ? "/" : rawPathname.replace(/\/+$/, "");
@@ -198,126 +212,7 @@ const worker: ExportedHandler<Env> = {
     }
 
     if (request.method === "GET" && pathname === "/onboarding") {
-      // Key is passed via URL fragment (#key=...) for security (not logged server-side)
-      const onboardingHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Get Started | AgentWatch</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"><style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',system-ui,sans-serif;background:#080A12;color:#e4e4e7;min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:40px 24px;overflow-y:auto}
-body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:radial-gradient(ellipse at 50% 0%,rgba(88,166,255,0.08) 0%,rgba(57,210,192,0.04) 40%,transparent 70%);pointer-events:none;z-index:0}
-.container{position:relative;z-index:1;width:100%;max-width:560px}
-.progress-wrap{display:flex;gap:6px;margin-bottom:40px}
-.progress-bar{flex:1;height:3px;border-radius:3px;background:rgba(255,255,255,0.06);transition:all 0.4s cubic-bezier(0.4,0,0.2,1)}
-.progress-bar.done{background:linear-gradient(90deg,#58A6FF,#3b82f6)}
-.step{display:none;animation:fadeSlideIn 0.5s cubic-bezier(0.4,0,0.2,1)}
-.step.active{display:block}
-@keyframes fadeSlideIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
-h1{font-size:2.2rem;font-weight:900;margin-bottom:12px;letter-spacing:-0.03em;background:linear-gradient(135deg,#fff 0%,#a1a1aa 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.subtitle{color:#71717a;font-size:15px;margin-bottom:32px;line-height:1.6}
-.glass{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:16px;padding:24px;margin-bottom:20px;transition:border-color 0.3s,box-shadow 0.3s}
-.glass:hover{border-color:rgba(255,255,255,0.1);box-shadow:0 8px 32px rgba(0,0,0,0.2)}
-.glass-label{display:block;font-size:11px;font-weight:600;color:#52525b;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:12px}
-.key-input-wrap{position:relative}
-.key-input{width:100%;padding:14px 120px 14px 16px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);background:rgba(0,0,0,0.4);color:#60a5fa;font-family:'JetBrains Mono',monospace;font-size:14px;transition:border-color 0.2s;outline:none}
-.key-input:focus{border-color:rgba(88,166,255,0.4)}
-.copy-btn{position:absolute;right:8px;top:50%;transform:translateY(-50%);padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;background:rgba(88,166,255,0.1);color:#58A6FF;border:1px solid rgba(88,166,255,0.2);cursor:pointer;transition:all 0.2s}
-.copy-btn:hover{background:rgba(88,166,255,0.2);border-color:rgba(88,166,255,0.4)}
-.copy-btn.copied{background:rgba(34,197,94,0.15);color:#22c55e;border-color:rgba(34,197,94,0.3)}
-pre{background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.04);border-radius:12px;padding:20px;overflow-x:auto;font-size:13px;color:#a1a1aa;margin:0;font-family:'JetBrains Mono',monospace;line-height:1.7}
-code{color:#e4e4e7}
-.code-tag{display:inline-block;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px}
-.code-tag.py{background:rgba(59,130,246,0.12);color:#60a5fa}
-.code-tag.ts{background:rgba(234,179,8,0.12);color:#eab308}
-.btn{display:inline-flex;align-items:center;justify-content:center;padding:14px 28px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;border:none;transition:all 0.25s cubic-bezier(0.4,0,0.2,1);text-decoration:none}
-.btn-primary{background:linear-gradient(135deg,#58A6FF,#3b82f6);color:#fff;box-shadow:0 4px 16px rgba(88,166,255,0.25)}
-.btn-primary:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(88,166,255,0.35)}
-.btn-primary:active{transform:translateY(0)}
-.btn-ghost{background:transparent;color:#71717a;border:1px solid rgba(255,255,255,0.08)}
-.btn-ghost:hover{color:#e4e4e7;border-color:rgba(255,255,255,0.15)}
-.btn-full{width:100%}
-.flex{display:flex}.gap-3{gap:12px}.justify-between{justify-content:space-between}.items-center{align-items:center}
-.mt-6{margin-top:24px}
-.text-sm{font-size:13px}.text-muted{color:#52525b}
-.skip-link{color:#52525b;font-size:13px;text-decoration:none;transition:color 0.2s}
-.skip-link:hover{color:#a1a1aa}
-.test-box{position:relative;overflow:hidden}
-.test-box::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(88,166,255,0.3),transparent)}
-#testResult{display:none;margin-top:16px;background:rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.04);border-radius:10px;padding:16px;font-size:12px;color:#a1a1aa;white-space:pre-wrap;max-height:200px;overflow:auto;font-family:'JetBrains Mono',monospace;animation:fadeSlideIn 0.3s ease}
-.success-msg{text-align:center;padding:20px;color:#22c55e;font-weight:600}
-.step-num{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:rgba(88,166,255,0.1);color:#58A6FF;font-size:12px;font-weight:700;margin-bottom:16px}
-.spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,0.2);border-top-color:#fff;border-radius:50%;animation:spin 0.6s linear infinite;margin-right:8px}
-@keyframes spin{to{transform:rotate(360deg)}}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
-.warning-box{background:rgba(234,179,8,0.1);border:1px solid rgba(234,179,8,0.3);border-radius:12px;padding:16px;margin-bottom:20px}
-.warning-box p{color:#eab308;font-size:13px;line-height:1.5}
-.next-steps{text-align:left}
-.next-steps li{color:#a1a1aa;font-size:14px;line-height:2;list-style:none;padding-left:20px;position:relative}
-.next-steps li::before{content:'\\2713';position:absolute;left:0;color:#22c55e;font-weight:700}
-@media(max-width:480px){h1{font-size:1.6rem}.glass{padding:18px}}
-</style></head><body><div class="container">
-<div class="progress-wrap"><div class="progress-bar done" id="p1"></div><div class="progress-bar" id="p2"></div><div class="progress-bar" id="p3"></div><div class="progress-bar" id="p4"></div></div>
-<div class="step active" id="s1">
-<div class="step-num">1</div><h1>Your API Key</h1><p class="subtitle">Copy this key — you'll need it to connect your app to AgentWatch.</p>
-<div class="glass"><div class="glass-label">API Key</div><div class="key-input-wrap"><input type="password" class="key-input" id="apiKey" value="" readonly><button class="copy-btn" onclick="copyKey(this)">Copy</button></div><p style="margin-top:12px;font-size:12px;color:#52525b">Shown once. Save it somewhere safe. Clear localStorage after saving.</p></div>
-<div class="warning-box"><p><strong>You also need a provider API key</strong> (OpenAI, Anthropic, etc.) to use AgentWatch. AgentWatch proxies your requests — you pay your own provider bill directly.</p></div>
-<div class="flex justify-between items-center"><a href="/" class="skip-link" onclick="localStorage.setItem('agentwatch_onboarding_done','1')">Skip for now</a><button class="btn btn-primary" onclick="go(2)">Next: Configure &rarr;</button></div>
-</div>
-<div class="step" id="s2">
-<div class="step-num">2</div><h1>Configure Your App</h1><p class="subtitle">Change your base URL and combine your keys. No SDK needed.</p>
-<div class="glass"><div class="code-tag py">Python (OpenAI)</div><pre><code>from openai import OpenAI
-
-client = OpenAI(
-    base_url="http://localhost:8787/v1/proxy/openai",
-    api_key="YOUR_AGENTWATCH_KEY:sk-proj-your-openai-key"
-)</code></pre></div>
-<div class="glass"><div class="code-tag ts">TypeScript (OpenAI)</div><pre><code>import OpenAI from 'openai';
-
-const client = new OpenAI({
-    baseURL: "http://localhost:8787/v1/proxy/openai",
-    apiKey: "YOUR_AGENTWATCH_KEY:sk-proj-your-openai-key"
-});</code></pre></div>
-
-<div class="glass"><div class="glass-label">Optional: Set a budget</div><pre><code>response = client.chat.completions.create(
-    model="gpt-4",
-    messages=[{"role": "user", "content": "..."}],
-    extra_headers={
-        "x-agentwatch-budget-usd": "2.00",
-        "x-agentwatch-session-id": "my-session"
-    }
-)</code></pre></div>
-<div class="flex justify-between items-center"><button class="btn btn-ghost" onclick="go(1)">&larr; Back</button><button class="btn btn-primary" onclick="go(3)">Next: Test &rarr;</button></div>
-</div>
-<div class="step" id="s3">
-<div class="step-num">3</div><h1>Test Your Integration</h1><p class="subtitle">Paste your provider API key below to run a live test through AgentWatch.</p>
-<div class="glass"><div class="glass-label">Your OpenAI API Key</div><div class="key-input-wrap"><input type="password" class="key-input" id="providerKey" placeholder="sk-proj-..." style="padding-right:16px"></div><p style="margin-top:12px;font-size:12px;color:#52525b">Your key is sent directly to OpenAI — AgentWatch never stores it.</p></div>
-<div class="glass test-box"><button class="btn btn-primary btn-full" onclick="testRequest()" id="testBtn">Run Test Request</button><div id="testResult"></div></div>
-<div class="flex justify-between items-center"><button class="btn btn-ghost" onclick="go(2)">&larr; Back</button><button class="btn btn-primary" onclick="go(4)">Next: You're Ready &rarr;</button></div>
-</div>
-<div class="step" id="s4">
-<div class="step-num">4</div><h1>You're All Set!</h1><p class="subtitle">AgentWatch is now protecting your LLM spending. Here's what to do next.</p>
-<div class="glass"><div class="glass-label">Quick Next Steps</div><ul class="next-steps">
-<li>Open your <a href="/v1/dashboard" style="color:#58A6FF">Dashboard</a> to see real-time usage</li>
-<li>Set budget limits with <code style="color:#60a5fa">x-agentwatch-budget-usd</code> header</li>
-<li>Add your team members under the <a href="/v1/dashboard" style="color:#58A6FF">Keys page</a></li>
-<li>Read the <a href="http://localhost:8787/docs" style="color:#58A6FF">Docs</a> for advanced features</li>
-</ul></div>
-<div class="glass"><div class="glass-label">Your AgentWatch Key</div><div class="key-input-wrap"><input type="text" class="key-input" id="finalKey" value="" readonly><button class="copy-btn" onclick="copyFinalKey(this)">Copy</button></div></div>
-<div class="mt-6" style="text-align:center"><a href="/v1/dashboard" onclick="localStorage.setItem('agentwatch_onboarding_done','1')" class="btn btn-primary">Go to Dashboard &rarr;</a></div>
-</div>
-</div>
-<script>
-// Read API key from URL fragment (not logged server-side)
-(function(){
-  const hash = window.location.hash;
-  if (hash && hash.startsWith('#key=')) {
-    const key = decodeURIComponent(hash.substring(5));
-    const apiKeyInput = document.getElementById('apiKey');
-    const finalKeyInput = document.getElementById('finalKey');
-    if (apiKeyInput) apiKeyInput.value = key;
-    if (finalKeyInput) finalKeyInput.value = key;
-    // Clear fragment for security
-    history.replaceState(null, '', window.location.pathname + window.location.search);
-  }
-})();
-function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove('active'));const step=document.getElementById('s'+n);step.classList.add('active');for(let i=1;i<=4;i++){const bar=document.getElementById('p'+i);bar.className='progress-bar'+(i<=n?' done':'');}}function copyKey(btn){const input=document.getElementById('apiKey');navigator.clipboard.writeText(input.value);btn.textContent='Copied!';btn.classList.add('copied');setTimeout(()=>{btn.textContent='Copy';btn.classList.remove('copied');},2000);}function copyFinalKey(btn){const input=document.getElementById('finalKey');navigator.clipboard.writeText(input.value);btn.textContent='Copied!';btn.classList.add('copied');setTimeout(()=>{btn.textContent='Copy';btn.classList.remove('copied');},2000);}async function testRequest(){const btn=document.getElementById('testBtn');const res=document.getElementById('testResult');const providerKey=document.getElementById('providerKey').value.trim();if(!providerKey){res.style.display='block';res.textContent='Please enter your OpenAI API key to run the test.';return;}btn.innerHTML='<span class="spinner"></span>Sending...';btn.disabled=true;res.style.display='none';try{const awKey=document.getElementById('apiKey').value;const r=await fetch('/v1/proxy/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+awKey+':'+providerKey},body:JSON.stringify({model:'gpt-4o-mini',messages:[{role:'user',content:'Say hello in one word'}],max_tokens:10})});const d=await r.json();res.style.display='block';if(r.ok){res.innerHTML='<div class="success-msg">&#10003; Integration successful!</div><pre style="margin-top:12px">'+JSON.stringify(d,null,2)+'<\/pre>';}else{res.textContent=JSON.stringify(d,null,2);}}catch(e){res.style.display='block';res.textContent='Error: '+e.message;}btn.innerHTML='Run Test Request';btn.disabled=false;}</script></body></html>`;
+      const onboardingHtml = getOnboardingHtml(env.SITE_URL || "http://localhost:8787");
       return new Response(onboardingHtml, {
         headers: { "Content-Type": "text/html; charset=utf-8", ...corsHeaders(env), ...securityHeaders() },
       });
@@ -359,11 +254,11 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
         if (!success) return jsonError(429, "Too many signup attempts. Please try again later.");
       }
 
-      let body: any;
-      try { body = await request.json(); } catch { return jsonError(400, "Invalid JSON"); }
+      let body: Record<string, unknown>;
+      try { body = await request.json() as Record<string, unknown>; } catch { return jsonError(400, "Invalid JSON"); }
       if (!body.email || !body.password) return jsonError(400, "Email and password required");
       const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!EMAIL_RE.test(body.email)) return jsonError(400, "Invalid email format");
+      if (!EMAIL_RE.test(String(body.email))) return jsonError(400, "Invalid email format");
 
       // Password strength validation
       const pw = String(body.password);
@@ -381,7 +276,7 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
         if (!authResp.ok) {
           const errText = await authResp.text();
           // Don't expose upstream error details to clients
-          console.error("Supabase signup error:", errText);
+          console.error("Supabase error:", authResp.status);
           return jsonError(authResp.status, "Failed to create user. Please try again.");
         }
 
@@ -408,7 +303,7 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
         // Save to KV (with 90-day TTL)
         const tokenTtl = 90 * 24 * 60 * 60;
         await env.KV.put(`tenant:token:${rawToken}`, JSON.stringify({ tenantId, role: "admin" }), { expirationTtl: tokenTtl });
-        await env.KV.put(`user_auth:${body.email.toLowerCase()}`, JSON.stringify({ tenantId, rawToken }), { expirationTtl: tokenTtl });
+        await env.KV.put(`user_auth:${String(body.email).toLowerCase()}`, JSON.stringify({ tenantId, rawToken }), { expirationTtl: tokenTtl });
 
         // Provision free tier tokens (100K tokens)
         try {
@@ -419,12 +314,12 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
 
         // Send welcome email
         if (env.RESEND_API_KEY) {
-          const welcomeHtml = buildWelcomeEmail(rawToken);
+          const welcomeHtml = buildWelcomeEmail(rawToken, env.SITE_URL);
           ctx.waitUntil(
             fetch("https://api.resend.com/emails", {
               method: "POST",
               headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-              body: JSON.stringify({ from: env.REPORT_FROM_EMAIL || "AgentWatch <hello@localhost>", to: body.email, subject: "Welcome to AgentWatch — Your API Key", html: welcomeHtml })
+              body: JSON.stringify({ from: env.REPORT_FROM_EMAIL || `AgentWatch <hello@${env.SITE_URL || "localhost:8787"}>`, to: body.email, subject: "Welcome to AgentWatch — Your API Key", html: welcomeHtml })
             }).catch(e => console.error("Failed to send welcome email:", e))
           );
 
@@ -455,11 +350,11 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
         if (!success) return jsonError(429, "Too many login attempts. Please try again later.");
       }
 
-      let body: any;
-      try { body = await request.json(); } catch { return jsonError(400, "Invalid JSON"); }
+      let body: Record<string, unknown>;
+      try { body = await request.json() as Record<string, unknown>; } catch { return jsonError(400, "Invalid JSON"); }
       if (!body.email || !body.password) return jsonError(400, "Email and password required");
       const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!EMAIL_RE.test(body.email)) return jsonError(400, "Invalid email format");
+      if (!EMAIL_RE.test(String(body.email))) return jsonError(400, "Invalid email format");
 
       if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) {
         const authResp = await fetch(`${env.SUPABASE_URL}/auth/v1/token?grant_type=password`, {
@@ -472,10 +367,10 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
           return jsonError(401, "Invalid email or password");
         }
 
-        let userDataStr = await env.KV.get(`user_auth:${body.email.toLowerCase()}`);
+        let userDataStr = await env.KV.get(`user_auth:${String(body.email).toLowerCase()}`);
         if (!userDataStr) {
           // Auto-provision if user exists in Supabase but KV was wiped or didn't sync
-          const authData = await authResp.json() as any;
+          const authData = await authResp.json() as AuthResponse;
           const tenantId = authData.user?.id || authData.id;
           if (!tenantId) {
             return jsonError(500, "Failed to retrieve user ID from authentication provider");
@@ -502,7 +397,7 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
           await env.KV.put(`tenant:token:${rawToken}`, JSON.stringify({ tenantId, role: "admin" }), { expirationTtl: tokenTtl });
           
           const newUserData = { tenantId, rawToken };
-          await env.KV.put(`user_auth:${body.email.toLowerCase()}`, JSON.stringify(newUserData), { expirationTtl: tokenTtl });
+          await env.KV.put(`user_auth:${String(body.email).toLowerCase()}`, JSON.stringify(newUserData), { expirationTtl: tokenTtl });
           
           try {
             const balanceStub = env.TENANT_BALANCE.get(env.TENANT_BALANCE.idFromName(tenantId));
@@ -553,7 +448,7 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
       }
 
       if (result && typeof result === 'object') {
-        (result as any).tenant_balance = tenant_balance;
+        (result as Record<string, unknown>).tenant_balance = tenant_balance;
       } else if (!result) {
         result = { tenant_balance };
       }
@@ -653,6 +548,50 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
       return Response.json(result || [], { status: 200, headers: corsHeaders(env) });
     }
 
+    // Per-agent spend breakdown
+    if (request.method === "GET" && pathname === "/v1/dashboard/agent-spend") {
+      const tenantId = await authenticateTenantId(request, env);
+      if (tenantId === "CONFIG_ERROR") return jsonError(500, "Tenant token map is not valid JSON.");
+      if (!tenantId) return jsonError(401, "Missing or invalid AgentWatch bearer token.");
+
+      const url2 = new URL(request.url);
+      const days = safeParseInt(url2.searchParams.get("days"), 7);
+      const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+
+      // Aggregate from audit logs
+      const agentMap = new Map<string, { tokens: number; cost: number; requests: number }>();
+      try {
+        const prefix = `audit:${tenantId}:`;
+        const listRes = await env.KV.list({ prefix, limit: 1000 });
+        for (const key of listRes.keys) {
+          const val = await env.KV.get(key.name);
+          if (val) {
+            try {
+              const entry = JSON.parse(val);
+              if (entry.timestamp && entry.timestamp < cutoff) continue;
+              const agent = entry.agent || "unattributed";
+              const tokens = (entry.prompt_tokens || 0) + (entry.completion_tokens || 0);
+              const cost = entry.cost_usd || 0;
+              const existing = agentMap.get(agent) || { tokens: 0, cost: 0, requests: 0 };
+              existing.tokens += tokens;
+              existing.cost += cost;
+              existing.requests += 1;
+              agentMap.set(agent, existing);
+            } catch(e) {}
+          }
+        }
+      } catch(e) {}
+
+      const result = Array.from(agentMap.entries()).map(([agent, data]) => ({
+        agent,
+        tokens: data.tokens,
+        cost: Math.round(data.cost * 10000) / 10000,
+        requests: data.requests,
+      })).sort((a, b) => b.cost - a.cost);
+
+      return Response.json(result, { status: 200, headers: corsHeaders(env) });
+    }
+
     if (request.method === "GET" && pathname === "/v1/dashboard/manage-teams") {
       const tenantId = await authenticateTenantId(request, env);
       if (tenantId === "CONFIG_ERROR") return jsonError(500, "Tenant token map is not valid JSON.");
@@ -687,7 +626,7 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
           return Response.json(result, { status: 200, headers: corsHeaders(env) });
         } else {
           const errText = await resp.text();
-          console.error("Supabase create_team error:", errText);
+          console.error("Supabase error:", resp.status);
           return jsonError(500, "Failed to create team. Please try again.");
         }
       }
@@ -712,7 +651,7 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
           return Response.json({ success: true }, { status: 200, headers: corsHeaders(env) });
         } else {
           const errText = await resp.text();
-          console.error("Supabase delete_team error:", errText);
+          console.error("Supabase error:", resp.status);
           return jsonError(500, "Failed to delete team. Please try again.");
         }
       }
@@ -769,7 +708,7 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
           result = await resp.json();
         } else {
           const errText = await resp.text();
-          console.error("Supabase create_developer_key error:", errText);
+          console.error("Supabase error:", resp.status);
           return jsonError(500, "Failed to create key. Please try again.");
         }
       } else {
@@ -785,7 +724,7 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
       } catch (e) { console.error("Audit log error:", e); }
 
       // Send the full token to the user exactly once
-      return Response.json({ ...(result as any), token: rawToken }, { status: 200, headers: corsHeaders(env) });
+      return Response.json({ ...(result as Record<string, unknown>), token: rawToken }, { status: 200, headers: corsHeaders(env) });
     }
 
     if (request.method === "DELETE" && pathname === "/v1/dashboard/keys") {
@@ -793,8 +732,8 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
       if (tenantId === "CONFIG_ERROR") return jsonError(500, "Tenant token map is not valid JSON.");
       if (!tenantId) return jsonError(401, "Missing or invalid AgentWatch bearer token.");
 
-      let body: any;
-      try { body = await request.json(); } catch { return jsonError(400, "Invalid JSON"); }
+      let body: Record<string, unknown>;
+      try { body = await request.json() as Record<string, unknown>; } catch { return jsonError(400, "Invalid JSON"); }
       if (!body.key_prefix) return jsonError(400, "key_prefix required");
 
       // Global Kill Switch: Instantly revoke via Edge KV
@@ -810,7 +749,7 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
 
       // Write Audit Log
       try {
-          await writeAuditLog(env, tenantId, "key_revoked", "dashboard_user", body.key_prefix, "SUCCESS");
+          await writeAuditLog(env, tenantId, "key_revoked", "dashboard_user", String(body.key_prefix), "SUCCESS");
       } catch (e) { console.error("Audit log error:", e); }
 
       return Response.json({ success: true }, { status: 200, headers: corsHeaders(env) });
@@ -840,46 +779,35 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
       return Response.json(result, { status: 200, headers: corsHeaders(env) });
     }
 
-    
-
-    // Product Hunt Launch Promo Validation
-    // Promo status check (unauthenticated — used by website to show/hide promo banner)
-    
-
-    
-
-    
-
-    
-
-    // Promo redemption recording (called after verify if promo was used)
-    if (request.method === "POST" && pathname === "/v1/promos/redeem") {
+    // Governance Timeline — audit logs for a specific session
+    if (request.method === "GET" && pathname === "/v1/dashboard/timeline") {
       const tenantId = await authenticateTenantId(request, env);
       if (tenantId === "CONFIG_ERROR") return jsonError(500, "Tenant token map is not valid JSON.");
       if (!tenantId) return jsonError(401, "Missing or invalid AgentWatch bearer token.");
 
-      let body: any;
-      try { body = await request.json(); } catch { return jsonError(400, "Invalid JSON"); }
+      const url2 = new URL(request.url);
+      const sessionId = url2.searchParams.get("session_id");
+      if (!sessionId) return jsonError(400, "session_id query parameter required");
 
-      const promoCode = body.promo_code;
-      const subscriptionId = body.subscription_id || null;
-      const discountAmount = body.discount_amount || 0;
-
-      if (!promoCode) return jsonError(400, "promo_code required");
-
-      // Record redemption in Supabase
-      if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) {
-        await callRpc(env, "record_promo_redemption", tenantId, promoCode, subscriptionId, discountAmount);
+      const result = [];
+      const prefix = `audit:${tenantId}:`;
+      const listRes = await env.KV.list({ prefix, limit: 200 });
+      for (const key of listRes.keys) {
+        const val = await env.KV.get(key.name);
+        if (val) {
+          try {
+            const entry = JSON.parse(val);
+            if (entry.resource === sessionId) {
+              result.push(entry);
+            }
+          } catch(e){}
+        }
       }
+      
+      // Sort by timestamp ascending (timeline order)
+      result.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-      // Increment counter atomically via Supabase RPC
-      if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) {
-        await callRpc(env, "increment_promo_count", promoCode);
-      }
-
-      ctx.waitUntil(logApiAccess(env, tenantId, "promo_redeem", "/v1/promos/redeem", "POST", request, 200, { promo_code: promoCode }));
-
-      return Response.json({ success: true }, { status: 200, headers: corsHeaders(env) });
+      return Response.json({ session_id: sessionId, events: result }, { status: 200, headers: corsHeaders(env) });
     }
 
     if (request.method === "DELETE" && pathname.startsWith("/v1/dashboard/keys/")) {
@@ -970,9 +898,9 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
       if (!tenantId) return jsonError(401, "Missing or invalid AgentWatch bearer token.");
 
       const webhookUrl = await env.KV.get(`tenant:slack_webhook:${tenantId}`);
-      let dbSettings: any = { alert_email: "", alert_threshold_pct: 80, data_retention_days: 30 };
+      let dbSettings: Record<string, unknown> = { alert_email: "", alert_threshold_pct: 80, data_retention_days: 30 };
       if (env.SUPABASE_URL) {
-        const res: any = await callRpc(env, "get_tenant_settings", tenantId);
+        const res = await callRpc(env, "get_tenant_settings", tenantId) as Record<string, unknown> | null;
         if (res && !res.error) {
           dbSettings = res;
         }
@@ -985,11 +913,14 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
 
       return Response.json({
         webhookUrl: webhookUrl || null,
-        alertEmail: dbSettings.alert_email || "",
-        alertThreshold: dbSettings.alert_threshold_pct || 80,
-        dataRetention: dbSettings.data_retention_days || 0,
+        alertEmail: String(dbSettings.alert_email || ""),
+        alertThreshold: Number(dbSettings.alert_threshold_pct) || 80,
+        dataRetention: Number(dbSettings.data_retention_days) || 0,
         fallbackPolicy: planData.fallbackPolicy,
-        cacheEnabled: tenantSettings.cache_enabled === true
+        cacheEnabled: tenantSettings.cache_enabled === true,
+        governance_mode: tenantSettings.governance_mode || "soft",
+        block_on_pii: tenantSettings.block_on_pii === true,
+        loop_detection_action: tenantSettings.loop_detection_action || "block",
       }, { status: 200, headers: corsHeaders(env) });
     }
 
@@ -998,16 +929,16 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
       if (tenantId === "CONFIG_ERROR") return jsonError(500, "Tenant token map is not valid JSON.");
       if (!tenantId) return jsonError(401, "Missing or invalid AgentWatch bearer token.");
 
-      let payload: { webhookUrl?: string, alertEmail?: string, alertThreshold?: number, dataRetention?: number, fallbackPolicy?: "fail_open" | "fail_closed", cacheEnabled?: boolean };
+      let payload: { webhookUrl?: string, alertEmail?: string, alertThreshold?: number, dataRetention?: number, fallbackPolicy?: "fail_open" | "fail_closed", cacheEnabled?: boolean, governance_mode?: string, block_on_pii?: boolean, loop_detection_action?: string };
       try {
-        payload = await request.json() as any;
+        payload = await request.json() as typeof payload;
       } catch (e) {
         return jsonError(400, "Invalid JSON body");
       }
 
       const planRaw = await env.KV.get(`tenant:plan:${tenantId}`);
       let isPro = false;
-      let planObj: any = { plan: "free", fallback_policy: "fail_open" };
+      let planObj: PlanData & Record<string, unknown> = { plan: "free", fallback_policy: "fail_open" };
       if (planRaw) {
         try {
           const planData = JSON.parse(planRaw);
@@ -1042,6 +973,22 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
       if (payload.cacheEnabled !== undefined) {
         if (!isPro) return jsonError(403, "Caching requires Pro plan.");
         await env.KV.put(`tenant:settings:${tenantId}`, JSON.stringify({ cache_enabled: payload.cacheEnabled }), { expirationTtl: 365 * 24 * 60 * 60 });
+      }
+
+      // Governance mode and security settings
+      if (payload.governance_mode !== undefined || payload.block_on_pii !== undefined || payload.loop_detection_action !== undefined) {
+        const existingRaw = await env.KV.get(`tenant:settings:${tenantId}`);
+        const existing = existingRaw ? JSON.parse(existingRaw) : {};
+        if (payload.governance_mode !== undefined) {
+          existing.governance_mode = payload.governance_mode; // "observe" | "soft" | "hard"
+        }
+        if (payload.block_on_pii !== undefined) {
+          existing.block_on_pii = payload.block_on_pii;
+        }
+        if (payload.loop_detection_action !== undefined) {
+          existing.loop_detection_action = payload.loop_detection_action;
+        }
+        await env.KV.put(`tenant:settings:${tenantId}`, JSON.stringify(existing), { expirationTtl: 365 * 24 * 60 * 60 });
       }
 
       if (env.SUPABASE_URL) {
@@ -1089,18 +1036,32 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
       const tenantId = await authenticateTenantId(request, env);
       if (!tenantId || tenantId === "CONFIG_ERROR") return jsonError(401, "Unauthorized");
       if (env.SUPABASE_URL) await callRpc(env, "delete_workspace", tenantId);
-      // Also delete from KV (exact prefix match to avoid cross-tenant deletion)
-      let listResult = await env.KV.list({ prefix: `tenant:`, limit: 100 });
-      do {
+      // Delete from KV using cursor-based pagination with timeout guard
+      const startTime = Date.now();
+      const MAX_DELETE_DURATION_MS = 30_000;
+      const BATCH_SIZE = 100;
+      let deletedCount = 0;
+      let cursor: string | undefined;
+      let listComplete = false;
+      while (!listComplete) {
+        if (Date.now() - startTime > MAX_DELETE_DURATION_MS) break;
+        const listResult = await env.KV.list({ prefix: `tenant:${tenantId}:`, limit: BATCH_SIZE, cursor });
+        const keysToDelete: string[] = [];
         for (const k of listResult.keys) {
-          if (k.name.startsWith(`tenant:${tenantId}:`)) {
-            await env.KV.delete(k.name);
-          }
+          keysToDelete.push(k.name);
         }
-        if (listResult.list_complete) break;
-        listResult = await env.KV.list({ prefix: `tenant:`, cursor: listResult.cursor, limit: 100 });
-      } while (true);
-      return Response.json({ success: true }, { status: 200, headers: corsHeaders(env) });
+        for (const key of keysToDelete) {
+          await env.KV.delete(key);
+          deletedCount++;
+        }
+        listComplete = listResult.list_complete;
+        cursor = listResult.list_complete ? undefined : listResult.cursor;
+        // Yield control periodically to avoid blocking
+        if (deletedCount > 0 && deletedCount % BATCH_SIZE === 0) {
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
+      return Response.json({ success: true, deleted_keys: deletedCount, ...(Date.now() - startTime > MAX_DELETE_DURATION_MS ? { partial: true } : {}) }, { status: 200, headers: corsHeaders(env) });
     }
 
     if (request.method === "GET" && pathname === "/v1/teams/budgets") {
@@ -1149,6 +1110,73 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
 
       const upsertResult = await upsertTeamBudget(env, tenantId, team, monthlyBudgetUsd, alertThresholdPct, hardStop);
       if (!upsertResult) return jsonError(500, "Failed to save team budget");
+      return Response.json({ success: true }, { status: 200, headers: corsHeaders(env) });
+    }
+
+    // --- Agent Budgets (Pro + Enterprise) ---
+    if (request.method === "GET" && pathname === "/v1/teams/agent-budgets") {
+      const tenantId = await authenticateTenantId(request, env);
+      if (tenantId === "CONFIG_ERROR") return jsonError(500, "Tenant token map is not valid JSON.");
+      if (!tenantId) return jsonError(401, "Missing or invalid AgentWatch bearer token.");
+      if (!(await isProOrHigher(tenantId, env))) return jsonError(403, "Agent Budgets require Pro plan.");
+
+      const result = await callRpc(env, "check_agent_budgets", tenantId);
+      return Response.json(result || [], { status: 200, headers: corsHeaders(env) });
+    }
+
+    if (request.method === "POST" && pathname === "/v1/teams/agent-budgets") {
+      const tenantId = await authenticateTenantId(request, env);
+      if (tenantId === "CONFIG_ERROR") return jsonError(500, "Tenant token map is not valid JSON.");
+      if (!tenantId) return jsonError(401, "Missing or invalid AgentWatch bearer token.");
+      if (!(await isProOrHigher(tenantId, env))) return jsonError(403, "Agent Budgets require Pro plan.");
+
+      let body: Record<string, unknown>;
+      try { body = await request.json() as Record<string, unknown>; } catch { return jsonError(400, "Invalid JSON"); }
+
+      const team = typeof body.team === "string" ? body.team : null;
+      const agentName = typeof body.agent_name === "string" ? body.agent_name : null;
+      const monthlyBudgetUsd = typeof body.monthly_budget_usd === "number" ? body.monthly_budget_usd : null;
+      const alertThresholdPct = typeof body.alert_threshold_pct === "number" ? body.alert_threshold_pct : 80;
+      const hardStop = typeof body.hard_stop === "boolean" ? body.hard_stop : false;
+
+      if (!team || !agentName || !monthlyBudgetUsd) return jsonError(400, "team, agent_name, and monthly_budget_usd are required");
+
+      const result = await callRpcWithParams(env, "upsert_agent_budget", {
+        tenant_id_param: tenantId,
+        team_param: team,
+        agent_param: agentName,
+        monthly_budget_usd: monthlyBudgetUsd,
+        alert_threshold_pct: alertThresholdPct,
+        hard_stop: String(hardStop),
+      });
+
+      // Invalidate KV cache
+      await env.KV.delete(`agent_budget:${tenantId}:${team}:${agentName}`);
+
+      return Response.json({ success: true, budget: result }, { status: 200, headers: corsHeaders(env) });
+    }
+
+    if (request.method === "DELETE" && pathname.startsWith("/v1/teams/agent-budgets/")) {
+      const tenantId = await authenticateTenantId(request, env);
+      if (tenantId === "CONFIG_ERROR") return jsonError(500, "Tenant token map is not valid JSON.");
+      if (!tenantId) return jsonError(401, "Missing or invalid AgentWatch bearer token.");
+      if (!(await isProOrHigher(tenantId, env))) return jsonError(403, "Agent Budgets require Pro plan.");
+
+      // Parse team/agent from path: /v1/teams/agent-budgets/{team}/{agent}
+      const pathParts = pathname.split("/").filter(Boolean);
+      const team = pathParts[3] || null;
+      const agentName = pathParts[4] || null;
+      if (!team || !agentName) return jsonError(400, "team and agent_name required in path");
+
+      await callRpcWithParams(env, "delete_agent_budget", {
+        tenant_id_param: tenantId,
+        team_param: team,
+        agent_param: agentName,
+      });
+
+      // Invalidate KV cache
+      await env.KV.delete(`agent_budget:${tenantId}:${team}:${agentName}`);
+
       return Response.json({ success: true }, { status: 200, headers: corsHeaders(env) });
     }
 
@@ -1292,10 +1320,149 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
     }
 
     // SSO / SAML Authentication — GATED: requires SSO_ENABLED=true AND Enterprise plan
-    
+    if (request.method === "GET" && pathname === "/v1/sso/saml/init") {
+      if (env.SSO_ENABLED !== "true") {
+        return jsonError(501, "SSO/SAML is experimental and not enabled. Set SSO_ENABLED=true to activate.");
+      }
+      const url = new URL(request.url);
+      const tenantId = url.searchParams.get("tenant_id");
+      if (!tenantId) return jsonError(400, "Missing tenant_id parameter");
 
-    
+      const ssoPlanData = await getTenantPlan(tenantId, env);
+      if (ssoPlanData.plan !== "enterprise") {
+        return jsonError(403, "SSO requires Enterprise plan.");
+      }
 
+      const samlConfig = env.SUPABASE_URL
+        ? await callRpc(env, "get_tenant_saml_config", tenantId)
+        : null;
+
+      if (!samlConfig || samlConfig === null) {
+        return jsonError(404, "SSO not configured for this tenant");
+      }
+
+      const config = samlConfig as unknown as SamlConfig;
+      const acsUrl = config.sp_acs_url || `${url.origin}/v1/sso/saml/acs`;
+      const { redirectUrl, requestId } = generateAuthnRequest(config.sp_entity_id || `agentwatch-${tenantId}`, acsUrl);
+
+      // Store requestId in KV for InResponseTo validation (5-min TTL)
+      await env.KV.put(`saml_request:${requestId}`, tenantId, { expirationTtl: 300 });
+
+      // Validate IdP URL uses HTTPS to prevent open redirect
+      try {
+        const idpUrl = new URL(config.idp_sso_url);
+        if (idpUrl.protocol !== "https:") {
+          return jsonError(400, "SSO configuration error: IdP URL must use HTTPS");
+        }
+      } catch {
+        return jsonError(400, "SSO configuration error: Invalid IdP URL");
+      }
+
+      // Redirect to IdP
+      return Response.redirect(`${config.idp_sso_url}${config.idp_sso_url.includes("?") ? "&" : "?"}SAMLRequest=${encodeURIComponent(redirectUrl.replace("?SAMLRequest=", ""))}`, 302);
+    }
+
+    if (request.method === "POST" && pathname === "/v1/sso/saml/acs") {
+      if (env.SSO_ENABLED !== "true") {
+        return jsonError(501, "SSO/SAML is experimental and not enabled.");
+      }
+      const formData = await request.formData();
+      const samlResponse = formData.get("SAMLResponse") as string | null;
+
+      if (!samlResponse) {
+        return jsonError(400, "Missing SAMLResponse");
+      }
+
+      // Extract tenant_id from RelayState to fetch SAML config
+      const relayState = formData.get("RelayState") as string | null;
+      if (!relayState) {
+        return jsonError(400, "Missing RelayState in SAML response");
+      }
+      const tenantId = relayState;
+
+      // Fetch SAML config to get IdP certificate for signature verification
+      const samlConfigRaw = env.SUPABASE_URL
+        ? await callRpc(env, "get_tenant_saml_config", tenantId)
+        : null;
+
+      if (!samlConfigRaw) {
+        return jsonError(400, "SSO not configured for this tenant");
+      }
+
+      const samlCfg = samlConfigRaw as unknown as SamlConfig;
+      const { success, subject, sessionIndex, inResponseTo, error } = parseSamlResponse(samlResponse, samlCfg.idp_certificate);
+
+      // Validate InResponseTo against stored requestId (replay protection)
+      if (!inResponseTo) {
+        return jsonError(401, "SSO authentication failed: Missing InResponseTo (replay protection required)");
+      }
+      {
+        const storedTenantId = await env.KV.get(`saml_request:${inResponseTo}`);
+        if (!storedTenantId) {
+          return jsonError(401, "SSO authentication failed: Invalid or expired request");
+        }
+        // Verify the stored tenant matches the RelayState tenant to prevent cross-tenant auth bypass
+        if (storedTenantId !== tenantId) {
+          return jsonError(401, "SSO authentication failed: Tenant mismatch");
+        }
+        // Delete used requestId (single-use)
+        await env.KV.delete(`saml_request:${inResponseTo}`);
+      }
+
+      if (!success) {
+        const safeError = escapeHtml(error || "Unknown error");
+        const html = `<!DOCTYPE html><html><head><title>SSO Error</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"></head><body style="font-family:system-ui;max-width:600px;margin:60px auto;padding:20px;background:#080A12;color:#e4e4e7">
+<h2 style="color:#ef4444">SSO Authentication Failed</h2>
+<p style="color:#a1a1aa">${safeError}</p>
+<a href="/login" style="color:#58A6FF">Return to Login</a>
+</body></html>`;
+        return new Response(html, {
+          status: 401,
+          headers: { "Content-Type": "text/html", ...securityHeaders() },
+        });
+      }
+
+      // Map subject to tenant
+      if (samlCfg && subject) {
+        const mappedTenant = mapSubjectToTenant(subject, samlCfg);
+
+        if (mappedTenant) {
+          // Generate session token
+          const sessionToken = `aw_sso_${crypto.randomUUID().replace(/-/g, "")}`;
+
+          // Store session in KV
+          ctx.waitUntil(
+            (async () => {
+              await env.KV.put(`tenant:token:${sessionToken}`, JSON.stringify({
+                tenantId: mappedTenant,
+                subject,
+                sessionIndex,
+                authMethod: "saml_sso",
+                createdAt: new Date().toISOString(),
+              }), { expirationTtl: 86400 });
+            })()
+          );
+
+          const html = `<!DOCTYPE html><html><head><title>SSO Login Successful</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"></head><body style="font-family:system-ui;max-width:600px;margin:60px auto;padding:20px;background:#080A12;color:#e4e4e7">
+<h2 style="color:#22c55e">SSO Login Successful</h2>
+<p>Redirecting to dashboard...</p>
+<script>
+(function() {
+  var token = "${sessionToken.replace(/"/g, '\\"')}";
+  var tenant = "${mappedTenant.replace(/"/g, '\\"')}";
+  window.location.replace("/login?oauth_token=" + encodeURIComponent(token) + "&oauth_tenant=" + encodeURIComponent(tenant));
+})();
+</script>
+</body></html>`;
+          return new Response(html, {
+            status: 200,
+            headers: { "Content-Type": "text/html", ...securityHeaders() },
+          });
+        }
+      }
+
+      return jsonError(401, "SSO authentication failed");
+    }
     // EU AI Act Compliance Report
     if (request.method === "GET" && pathname === "/v1/compliance/report") {
       const tenantId = await authenticateTenantId(request, env);
@@ -1345,7 +1512,7 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
 
       const { getSlaConfig, generateSlaReport, generateSlaReportHtml } = await import("./sla");
       const config = getSlaConfig(plan);
-      const report = generateSlaReport(tenantId, slaRecords as any[] || [], config);
+      const report = generateSlaReport(tenantId, (Array.isArray(slaRecords) ? slaRecords as UptimeRecord[] : []), config);
 
       if (format === "html") {
         const html = generateSlaReportHtml(report);
@@ -1402,85 +1569,7 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
         return jsonError(500, "Email service not configured");
       }
 
-      const html = `
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>New Access Request</title>
-      <style>
-        body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
-        table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
-        img { -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }
-        body { height: 100% !important; margin: 0 !important; padding: 0 !important; width: 100% !important; background-color: #050505; }
-      </style>
-      </head>
-      <body style="background-color: #050505; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #050505; padding: 40px 20px;">
-          <tr>
-            <td align="center">
-              <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #0a0a0a; border: 1px solid #1f1f22; border-radius: 16px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);">
-                <tr>
-                  <td align="center" style="padding: 48px 40px 32px; background: linear-gradient(180deg, #111115 0%, #0a0a0a 100%); border-bottom: 1px solid #1f1f22;">
-                    <span style="display: inline-block; background: rgba(59, 130, 246, 0.1); color: #60a5fa; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; border: 1px solid rgba(59, 130, 246, 0.2);">Hot Lead</span>
-                    <h1 style="margin: 16px 0 0 0; font-size: 24px; font-weight: 700; letter-spacing: -0.5px; color: #ffffff;">New Access Request</h1>
-                  </td>
-                </tr>
-                <tr>
-                  <td align="left" style="padding: 40px;">
-                    <!-- Contact Details Group -->
-                    <h3 style="color: #71717a; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; border-bottom: 1px solid #1f1f22; padding-bottom: 8px; margin: 0 0 20px 0;">Contact Information</h3>
-                    <div style="margin-bottom: 32px;">
-                      <div style="margin-bottom: 16px;">
-                        <span style="display: block; color: #a1a1aa; font-size: 13px; margin-bottom: 4px;">Full Name</span>
-                        <strong style="color: #e4e4e7; font-size: 18px;">${escapeHtml(name)}</strong>
-                      </div>
-                      <div>
-                        <span style="display: block; color: #a1a1aa; font-size: 13px; margin-bottom: 4px;">Work Email</span>
-                        <a href="mailto:${escapeHtml(email)}" style="color: #60a5fa; font-size: 16px; text-decoration: none; font-weight: 600;">${escapeHtml(email)}</a>
-                      </div>
-                    </div>
-
-                    <!-- Company Details Group -->
-                    <h3 style="color: #71717a; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; border-bottom: 1px solid #1f1f22; padding-bottom: 8px; margin: 0 0 20px 0;">Company Profile</h3>
-                    <div>
-                      <div style="margin-bottom: 16px;">
-                        <span style="display: block; color: #a1a1aa; font-size: 13px; margin-bottom: 4px;">Organization</span>
-                        <strong style="color: #e4e4e7; font-size: 18px;">${escapeHtml(company)}</strong>
-                      </div>
-                      <div style="background-color: #052e16; border: 1px solid #064e3b; border-radius: 8px; padding: 16px; margin-top: 20px;">
-                        <span style="display: block; color: #34d399; font-size: 13px; margin-bottom: 4px;">Total Monthly AI Spend</span>
-                        <strong style="color: #6ee7b7; font-size: 24px;">${escapeHtml(spend || "Not specified")}</strong>
-                      </div>
-                      <div style="background-color: #1e1b4b; border: 1px solid #3730a3; border-radius: 8px; padding: 16px; margin-top: 12px;">
-                        <span style="display: block; color: #a78bfa; font-size: 13px; margin-bottom: 4px;">Selected Plan</span>
-                        <strong style="color: #c4b5fd; font-size: 20px;">${escapeHtml(plan === "free" ? "Free Tier" : plan === "pro" ? "Pro Plan ($99/mo)" : plan === "enterprise" ? "Enterprise (Custom)" : plan)}</strong>
-                      </div>
-                    </div>
-                    
-                    <!-- Action Button -->
-                    <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-top: 40px;">
-                      <tr>
-                        <td align="center">
-                          <a href="mailto:${escapeHtml(email)}?subject=Re: AgentWatch Inquiry" style="display: inline-block; background: linear-gradient(135deg, #3b82f6, #6366f1); color: #ffffff; font-size: 15px; font-weight: 600; text-decoration: none; padding: 14px 32px; border-radius: 8px; box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4); border: 1px solid #3b82f6;">Reply to Prospect</a>
-                        </td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-                <tr>
-                  <td align="center" style="padding: 32px 40px; background-color: #050505; border-top: 1px solid #1f1f22;">
-                    <p style="color: #52525b; font-size: 12px; margin: 0; text-align: center;">Captured directly from the AgentWatch Edge Network</p>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-        </table>
-      </body>
-      </html>
-      `;
+      const html = getContactEmailHtml(name, email, company, spend, plan);
 
       try {
         const resp = await fetch("https://api.resend.com/emails", {
@@ -1490,8 +1579,8 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            from: env.REPORT_FROM_EMAIL || "AgentWatch <hello@localhost>",
-            to: ["admin@localhost"],
+            from: env.REPORT_FROM_EMAIL || `AgentWatch <hello@${env.SITE_URL || "localhost:8787"}>`,
+            to: [env.CONTACT_EMAIL || (env.SITE_URL ? `admin@${new URL(env.SITE_URL).hostname}` : "admin@localhost")],
             replyTo: email,
             subject: `AgentWatch Access Request — ${company}`,
             html,
@@ -1621,8 +1710,43 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
       }, { status: 200, headers: { "content-type": "application/json", ...corsHeaders(env) } });
     }
 
+    // Pre-execution Cost Estimation
+    if (request.method === "POST" && pathname === "/v1/cost/estimate") {
+      const tenantId = await authenticateTenantId(request, env);
+      if (tenantId === "CONFIG_ERROR") return jsonError(500, "Tenant token map is not valid JSON.");
+      if (!tenantId) return jsonError(401, "Missing or invalid AgentWatch bearer token.");
+
+      let body: { steps: Array<{ model: string; prompt_tokens?: number; completion_tokens?: number; provider?: string }> };
+      try { body = await request.json() as typeof body; } catch { return jsonError(400, "Invalid JSON"); }
+
+      // Accept a workflow description: array of steps with model and token estimates
+      // Each step: { model: string, prompt_tokens?: number, completion_tokens?: number, provider?: string }
+      const steps = Array.isArray(body.steps) ? body.steps : [];
+      if (steps.length === 0) {
+        return jsonError(400, "Provide 'steps' array with model and token estimates");
+      }
+
+      let totalCostUsd = 0;
+      const stepEstimates: Array<{ model: string; prompt_tokens: number; completion_tokens: number; estimated_cost_usd: number }> = [];
+
+      for (const step of steps) {
+        const model = typeof step.model === "string" ? step.model : "unknown";
+        const promptTokens = typeof step.prompt_tokens === "number" ? step.prompt_tokens : 1000;
+        const completionTokens = typeof step.completion_tokens === "number" ? step.completion_tokens : 500;
+        const cost = calculateCost(promptTokens, completionTokens, model);
+        totalCostUsd += cost;
+        stepEstimates.push({ model, prompt_tokens: promptTokens, completion_tokens: completionTokens, estimated_cost_usd: cost });
+      }
+
+      return Response.json({
+        total_estimated_cost_usd: totalCostUsd,
+        step_count: steps.length,
+        steps: stepEstimates,
+      }, { status: 200, headers: corsHeaders(env) });
+    }
+
     if (pathname === "/docs") {
-      return Response.redirect("http://localhost:8787/docs", 302);
+      return Response.redirect(`${env.SITE_URL || "http://localhost:8787"}/docs`, 302);
     }
 
     if (pathname === "/v1/admin/provision" && request.method === "POST") {
@@ -1633,7 +1757,12 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
       const secret = request.headers.get("x-admin-secret");
       const adminKeyBuf = new TextEncoder().encode((secret || "").padEnd(256, "\0"));
       const expectedBuf = new TextEncoder().encode(env.ADMIN_SECRET.padEnd(256, "\0"));
-      const validSecret = secret && (crypto.subtle as unknown as { timingSafeEqual(a: BufferSource, b: BufferSource): boolean }).timingSafeEqual(adminKeyBuf, expectedBuf);
+      let validSecret = false;
+      try {
+        validSecret = !!secret && safeTimingEqual(adminKeyBuf, expectedBuf);
+      } catch {
+        return jsonError(500, "Security module unavailable.");
+      }
       if (!validSecret) {
         return jsonError(401, "Invalid x-admin-secret header.");
       }
@@ -1666,7 +1795,12 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
       const secret = request.headers.get("x-admin-secret");
       const adminKeyBuf2 = new TextEncoder().encode((secret || "").padEnd(256, "\0"));
       const expectedBuf2 = new TextEncoder().encode(env.ADMIN_SECRET.padEnd(256, "\0"));
-      const validSecret2 = secret && (crypto.subtle as unknown as { timingSafeEqual(a: BufferSource, b: BufferSource): boolean }).timingSafeEqual(adminKeyBuf2, expectedBuf2);
+      let validSecret2 = false;
+      try {
+        validSecret2 = !!secret && safeTimingEqual(adminKeyBuf2, expectedBuf2);
+      } catch {
+        return jsonError(500, "Security module unavailable.");
+      }
       if (!validSecret2) {
         return jsonError(401, "Invalid x-admin-secret header.");
       }
@@ -1698,10 +1832,6 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
       } else {
         return jsonError(500, "Failed to configure budget in Supabase.");
       }
-    }
-
-    if (pathname === "/v1/webhook") {
-      return new Response("This endpoint is no longer used. Payments are handled via Razorpay at /v1/payments/.", { status: 410 });
     }
 
     if (request.method === "POST" && pathname === "/v1/ingest") {
@@ -1915,7 +2045,7 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
       if (tenantId === "CONFIG_ERROR") return jsonError(500, "Tenant token map is not valid JSON.");
       if (!tenantId) return jsonError(401, "Missing or invalid AgentWatch bearer token.");
 
-      let payments: any[] = [];
+      let payments: Record<string, unknown>[] = [];
 
       return Response.json({ payments }, { status: 200, headers: corsHeaders(env) });
     }
@@ -1940,7 +2070,7 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
       if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) {
         try {
           const samlConfig = await callRpc(env, "get_tenant_saml_config", tenantId);
-          configured = !!(samlConfig && samlConfig !== null && (samlConfig as any).idp_sso_url);
+          configured = !!(samlConfig && samlConfig !== null && (samlConfig as SamlConfig).idp_sso_url);
         } catch {}
       }
 
@@ -2008,8 +2138,8 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
 
       const uniqueIps = new Set(accessLogs.map(l => l.ip)).size;
       const failedAuthAttempts = authEvents.filter(e => e.event_type.includes("failure") || e.event_type.includes("failed")).length;
-      const dbSettings: any = env.SUPABASE_URL ? await callRpc(env, "get_tenant_settings", tenantId) : null;
-      const retentionDays = dbSettings?.data_retention_days ?? 30;
+      const dbSettings = (env.SUPABASE_URL ? await callRpc(env, "get_tenant_settings", tenantId) : null) as Record<string, unknown> | null;
+      const retentionDays = (dbSettings?.data_retention_days as number) ?? 30;
 
       const report: Soc2Export = {
         tenantId,
@@ -2047,13 +2177,19 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
       });
     }
 
+    if (request.method === "GET" && pathname === "/") {
+      return new Response(loginHtml, {
+        headers: { "Content-Type": "text/html; charset=utf-8", ...corsHeaders(env), ...securityHeaders() },
+      });
+    }
+
     const route = matchRoute(request.url, env, request.headers.get("x-agentwatch-residency") || undefined);
     if (!route) {
       if (pathname.includes("/v1/") || pathname.includes("/proxy/")) {
-        return jsonError(404, "No AgentWatch proxy route matched this request. Ensure your Base URL is correct (e.g., http://localhost:8787/v1/proxy/gemini).");
+        return jsonError(404, `No AgentWatch proxy route matched this request. Ensure your Base URL is correct (e.g., ${env.SITE_URL || "http://localhost:8787"}/v1/proxy/gemini).`);
       }
       if (request.method === "GET") {
-        const assetResponse = await env.ASSETS.fetch(request.url, request as any);
+        const assetResponse = await env.ASSETS.fetch(request.url, request);
         if (assetResponse.status !== 404) {
           return assetResponse;
         }
@@ -2207,7 +2343,7 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
     const requestForFailover = request.clone();
 
     // Cache lookup
-    const payloadRecord = payloadData.json as Record<string, any> | null;
+    const payloadRecord = payloadData.json as Record<string, unknown> | null;
     const headerCacheEnabled = request.headers.get("x-agentwatch-cache") === "true";
     const settingsRaw = await env.KV.get(`tenant:settings:${tenantId}`);
     const tenantSettings = settingsRaw ? JSON.parse(settingsRaw) : {};
@@ -2331,10 +2467,11 @@ function go(n){document.querySelectorAll('.step').forEach(s=>s.classList.remove(
     }
   },
 
-  async queue(batch: MessageBatch<any>, env: Env): Promise<void> {
+  // MessageBatch generic is unknown due to Cloudflare Workers queue handler typing
+  async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
     for (const msg of batch.messages) {
       try {
-        await writeSupabaseLogDirect(env, msg.body);
+        await writeSupabaseLogDirect(env, msg.body as LogRecord);
         msg.ack();
       } catch (err) {
         console.error("AgentWatch Queue sync error", err);
@@ -2380,6 +2517,11 @@ function matchRoute(rawUrl: string, env: Env, residencyHeader?: string): RouteMa
     // pathParts[0] is the region
     // e.g. /v1/proxy/bedrock/us-east-1/model/...
     const region = pathParts[0];
+    // H7 fix: restrict to known AWS region patterns to prevent SSRF
+    const BEDROCK_REGION_RE = /^(us|eu|ap|sa|ca|me|af|il)-(north|south|east|west|central|northeast|southeast|northwest|southwest)-\d$/;
+    if (!BEDROCK_REGION_RE.test(region)) {
+      return null; // Invalid region — reject the request
+    }
     baseUrl = `https://bedrock-runtime.${region}.amazonaws.com`;
     upstreamPath = `/${pathParts.slice(1).join("/")}`;
   } else if (provider === "anthropic") baseUrl = env.ANTHROPIC_BASE_URL || ANTHROPIC_DEFAULT_BASE_URL;
@@ -2429,7 +2571,18 @@ interface AuthResult {
 }
 
 async function getTenantPlan(tenantId: string, env: Env): Promise<{ plan: string, fallbackPolicy: "fail_open" }> {
-  return { plan: "community", fallbackPolicy: "fail_open" };
+  const cached = await env.KV.get(`tenant:plan:${tenantId}`);
+  if (cached) {
+    try {
+      const data = JSON.parse(cached);
+      let plan = data.plan || "free";
+      if (data.currentPeriodEnd && new Date(data.currentPeriodEnd) < new Date()) {
+        plan = "free";
+      }
+      return { plan, fallbackPolicy: data.fallback_policy || "fail_open" };
+    } catch { return { plan: "free", fallbackPolicy: "fail_open" }; }
+  }
+  return { plan: "free", fallbackPolicy: "fail_open" };
 }
 
 async function isProOrHigher(tenantId: string, env: Env): Promise<boolean> {
@@ -2513,6 +2666,22 @@ async function authenticateTenantId(request: Request, env: Env): Promise<string 
   return result.tenantId;
 }
 
+function hasTimingSafeEqual(obj: unknown): obj is { timingSafeEqual(a: ArrayBufferView, b: ArrayBufferView): boolean } {
+  return typeof obj === "object" && obj !== null && typeof (obj as Record<string, unknown>).timingSafeEqual === "function";
+}
+
+function safeTimingEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (hasTimingSafeEqual(crypto.subtle)) {
+    return crypto.subtle.timingSafeEqual(a, b);
+  }
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a[i] ^ b[i];
+  }
+  return diff === 0;
+}
+
 function constantTimeLookup(token: string, tokens: Map<string, string>): string | null {
   const encoder = new TextEncoder();
   const tokenBytes = encoder.encode(token);
@@ -2522,7 +2691,7 @@ function constantTimeLookup(token: string, tokens: Map<string, string>): string 
     const storedBytes = encoder.encode(storedToken);
     // Always run timingSafeEqual even after a match to prevent timing leaks
     try {
-      const isMatch = (crypto.subtle as unknown as { timingSafeEqual(a: BufferSource, b: BufferSource): boolean }).timingSafeEqual(tokenBytes, storedBytes);
+      const isMatch = safeTimingEqual(tokenBytes, storedBytes);
       if (isMatch && !matched) {
         matched = tenantId;
       }
@@ -2659,56 +2828,6 @@ async function buildUpstreamRequest(request: Request, route: RouteMatch, env: En
 
   return finalRequest;
 }
-
-function translateOpenAIToAnthropic(payload: Record<string, any>, model: string): any {
-  const messages = payload.messages || [];
-  let system = undefined;
-  const anthropicMessages = [];
-
-  for (const msg of messages) {
-    if (msg.role === "system") {
-      system = system ? `${system}\n${msg.content}` : msg.content;
-    } else {
-      anthropicMessages.push({
-        role: msg.role === "assistant" ? "assistant" : "user",
-        content: msg.content
-      });
-    }
-  }
-
-  return {
-    model: model,
-    system: system,
-    messages: anthropicMessages,
-    max_tokens: payload.max_tokens || payload.max_completion_tokens || 4096,
-    temperature: payload.temperature,
-    top_p: payload.top_p,
-    stream: payload.stream,
-  };
-}
-
-function translateAnthropicToOpenAI(payload: Record<string, any>, model: string): any {
-  const messages = [];
-  if (payload.system) {
-    messages.push({ role: "system", content: payload.system });
-  }
-  for (const msg of (payload.messages || [])) {
-    messages.push({
-      role: msg.role === "assistant" ? "assistant" : "user",
-      content: msg.content
-    });
-  }
-
-  return {
-    model: model,
-    messages: messages,
-    max_tokens: payload.max_tokens,
-    temperature: payload.temperature,
-    top_p: payload.top_p,
-    stream: payload.stream,
-  };
-}
-
 
 
 async function capturePayload(request: { text(): Promise<string> }): Promise<CapturedPayload> {
@@ -3470,7 +3589,46 @@ async function callRpc(env: Env, functionName: string, tenantId: string, ...args
     });
 
     if (!response.ok) {
-      console.error(`AgentWatch RPC ${functionName} failed`, response.status, await response.text());
+      console.error(`Supabase RPC ${functionName} failed:`, response.status);
+      return null;
+    }
+
+    const text = await response.text();
+    return JSON.parse(text);
+  } catch (error) {
+    console.error(`AgentWatch RPC ${functionName} error`, error);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function callRpcWithParams(
+  env: Env, functionName: string, params: Record<string, string | number>
+): Promise<unknown> {
+  const url = `${env.SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/rpc/${functionName}`;
+  const body: Record<string, string> = {};
+  for (const [k, v] of Object.entries(params)) {
+    body[k] = String(v);
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+        authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      console.error(`Supabase RPC ${functionName} failed:`, response.status);
       return null;
     }
 
@@ -3531,7 +3689,7 @@ async function writeSupabaseLogDirect(env: Env, record: LogRecord): Promise<void
     });
 
     if (!response.ok) {
-      console.error("AgentWatch Supabase log insert failed", response.status, await response.text());
+      console.error("Supabase log insert failed:", response.status);
       throw new Error(`Supabase insert failed: ${response.status}`);
     }
   } catch (error) {
@@ -3595,10 +3753,10 @@ let rateLimitWarningLogged = false;
 async function checkRateLimit(tenantId: string, team: string, env: Env): Promise<boolean> {
   if (!env.RATE_LIMITER) {
     if (!rateLimitWarningLogged) {
-      console.warn("AgentWatch: RATE_LIMITER binding not configured. All requests are being denied. Configure a rate limiter in wrangler.toml.");
+      console.warn("RATE_LIMITER not configured — allowing all requests");
       rateLimitWarningLogged = true;
     }
-    return false;
+    return true;
   }
   const { success } = await env.RATE_LIMITER.limit({ key: `${tenantId}:${team}` });
   return success;
@@ -3852,8 +4010,16 @@ function corsHeaders(env: Env): Record<string, string> {
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
   };
   if (origin) {
-    headers["Access-Control-Allow-Origin"] = origin;
+    try {
+      const parsed = new URL(origin);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        origin = "";
+      }
+    } catch {
+      origin = "";
+    }
   }
+  headers["Access-Control-Allow-Origin"] = origin || "*";
   return headers;
 }
 
@@ -3864,15 +4030,6 @@ function securityHeaders(): Record<string, string> {
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
     "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data: https:; connect-src 'self'; frame-src 'self'",
   };
-}
-
-function timingSafeEqualStrings(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
 }
 
 async function provisionTenant(env: Env, customerEmail: string, customerId?: string | null, subscriptionId?: string | null) {
@@ -3899,101 +4056,7 @@ async function provisionTenant(env: Env, customerEmail: string, customerId?: str
   }
 
   if (env.RESEND_API_KEY) {
-    const emailHtml = `
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Welcome to AgentWatch</title>
-      <style>
-        body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
-        table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
-        img { -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }
-        body { height: 100% !important; margin: 0 !important; padding: 0 !important; width: 100% !important; background-color: #050505; }
-      </style>
-      </head>
-      <body style="background-color: #050505; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';">
-        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #050505; padding: 40px 20px;">
-          <tr>
-            <td align="center">
-              <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #0a0a0a; border: 1px solid #1f1f22; border-radius: 16px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);">
-                <tr>
-                  <td align="center" style="padding: 48px 40px 32px; background: linear-gradient(180deg, #111115 0%, #0a0a0a 100%); border-bottom: 1px solid #1f1f22;">
-                    <h1 style="margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.5px; color: #ffffff; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                      AgentWatch
-                    </h1>
-                    <p style="margin: 16px 0 0 0; font-size: 16px; line-height: 1.5; color: #a1a1aa; font-weight: 400;">
-                      The expense policy for your AI agents.
-                    </p>
-                  </td>
-                </tr>
-                <tr>
-                  <td align="left" style="padding: 40px;">
-                    <h2 style="margin: 0 0 24px; font-size: 20px; font-weight: 600; color: #f4f4f5; letter-spacing: -0.5px;">AgentWatch blocks runaway LLM agents before they burn your budget. Not after.</h2>
-                    <p style="margin: 0 0 32px; font-size: 15px; line-height: 1.6; color: #a1a1aa;">
-                      Your workspace is now fully provisioned. You have successfully activated automated protection against runaway agent spend. Works in 2 lines of code.
-                    </p>
-                    <div style="background: #111115; border: 1px solid #27272a; border-radius: 12px; padding: 24px; margin-bottom: 32px;">
-                      <p style="margin: 0 0 12px; font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; font-weight: 700; color: #71717a;">Production API Key</p>
-                      <div style="background: #000000; border: 1px solid #3f3f46; border-radius: 8px; padding: 16px; margin: 0;">
-                        <code style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 15px; color: #60a5fa; word-break: break-all;">${newTenantToken}</code>
-                      </div>
-                      <p style="margin: 12px 0 0; font-size: 13px; color: #71717a;">Keep this key highly secure. Do not commit it to version control.</p>
-                    </div>
-                    <h3 style="margin: 0 0 20px; font-size: 16px; font-weight: 600; color: #e4e4e7; letter-spacing: -0.3px;">Quick Start Integration</h3>
-                    <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #09090b; border: 1px solid #1f1f22; border-radius: 12px;">
-                      <tr>
-                        <td style="padding: 24px;">
-                          <table border="0" cellpadding="0" cellspacing="0" width="100%">
-                            <tr>
-                              <td valign="top" style="width: 28px; color: #8b5cf6; font-weight: 600; font-size: 15px;">1.</td>
-                              <td style="padding-bottom: 20px; font-size: 15px; color: #a1a1aa; line-height: 1.5;">
-                                <strong style="color: #d4d4d8;">Configure your API Key (BYOK)</strong><br>
-                                Combine your AgentWatch key with your real OpenAI/Anthropic key using a colon.<br>
-                                <code style="display: inline-block; background: #18181b; padding: 4px 8px; border-radius: 6px; margin-top: 8px; border: 1px solid #27272a; font-size: 13px; color: #e4e4e7;">export OPENAI_API_KEY="aw_live_...:sk-proj-..."</code>
-                              </td>
-                            </tr>
-                            <tr>
-                              <td valign="top" style="width: 28px; color: #8b5cf6; font-weight: 600; font-size: 15px;">2.</td>
-                              <td style="padding-bottom: 20px; font-size: 15px; color: #a1a1aa; line-height: 1.5;">
-                                <strong style="color: #d4d4d8;">Route Traffic to the Proxy</strong><br>
-                                Point your SDK or CLI tool's base URL to the AgentWatch edge.<br>
-                                <code style="display: inline-block; background: #18181b; padding: 4px 8px; border-radius: 6px; margin-top: 8px; border: 1px solid #27272a; font-size: 13px; color: #e4e4e7;">export OPENAI_BASE_URL="http://localhost:8787/v1/proxy/openai"</code>
-                              </td>
-                            </tr>
-                            <tr>
-                              <td valign="top" style="width: 28px; color: #8b5cf6; font-weight: 600; font-size: 15px;">3.</td>
-                              <td style="font-size: 15px; color: #a1a1aa; line-height: 1.5;">
-                                <strong style="color: #d4d4d8;">Run Your AI Tools</strong><br>
-                                Execute your agents (Cursor, Claude Code, etc.). All telemetry and budgets are instantly tracked, while your real API key is securely forwarded upstream.
-                              </td>
-                            </tr>
-                          </table>
-                        </td>
-                      </tr>
-                    </table>
-
-                  </td>
-                </tr>
-                <tr>
-                  <td align="center" style="padding: 32px 40px; background-color: #050505; border-top: 1px solid #1f1f22;">
-                    <p style="margin: 0; font-size: 13px; color: #52525b; line-height: 1.6;">
-                      AgentWatch Inc.<br>
-                      Securing the future of AI infrastructure.
-                    </p>
-                    <p style="margin: 12px 0 0; font-size: 13px; color: #52525b;">
-                      Need architectural support? Reply directly to this email to reach our engineering team.
-                    </p>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-        </table>
-      </body>
-      </html>
-    `;
+    const emailHtml = getProvisionEmailHtml(newTenantToken, env.SITE_URL || "http://localhost:8787");
 
     await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -4002,7 +4065,7 @@ async function provisionTenant(env: Env, customerEmail: string, customerId?: str
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        from: env.REPORT_FROM_EMAIL || "AgentWatch Onboarding <hello@localhost>",
+        from: env.REPORT_FROM_EMAIL || `AgentWatch Onboarding <hello@${env.SITE_URL || "localhost:8787"}>`,
         to: [customerEmail],
         subject: "Welcome to AgentWatch - Your API Key Inside",
         html: emailHtml
@@ -4011,42 +4074,4 @@ async function provisionTenant(env: Env, customerEmail: string, customerId?: str
   }
   
   return { tenantId: newTenantId, token: newTenantToken };
-}
-
-function buildWelcomeEmail(apiKey: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="background-color:#050505;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;">
-<table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color:#050505;padding:40px 20px;">
-<tr><td align="center">
-<table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:600px;background-color:#0a0a0a;border:1px solid #1f1f22;border-radius:16px;overflow:hidden;">
-<tr><td align="center" style="padding:48px 40px 32px;background:linear-gradient(180deg,#111115 0%,#0a0a0a 100%);border-bottom:1px solid #1f1f22;">
-<h1 style="margin:0;font-size:24px;font-weight:700;color:#ffffff;">AgentWatch</h1>
-<p style="margin:16px 0 0;font-size:16px;color:#a1a1aa;">The expense policy for your AI agents.</p>
-</td></tr>
-<tr><td align="left" style="padding:40px;">
-<h2 style="margin:0 0 24px;font-size:20px;font-weight:600;color:#f4f4f5;">Welcome aboard. Your agents are now protected.</h2>
-<p style="margin:0 0 32px;font-size:15px;line-height:1.6;color:#a1a1aa;">You have 50K free tokens. Here's your API key — combine it with your OpenAI or Anthropic key to get started.</p>
-<div style="background:#111115;border:1px solid #27272a;border-radius:12px;padding:24px;margin-bottom:32px;">
-<p style="margin:0 0 12px;font-size:12px;text-transform:uppercase;letter-spacing:1.2px;font-weight:700;color:#71717a;">Your API Key</p>
-<div style="background:#000000;border:1px solid #3f3f46;border-radius:8px;padding:16px;">
-<code style="font-family:ui-monospace,monospace;font-size:15px;color:#60a5fa;word-break:break-all;">${apiKey}</code>
-</div>
-<p style="margin:12px 0 0;font-size:13px;color:#71717a;">Keep this key secure. Do not commit it to version control.</p>
-</div>
-<h3 style="margin:0 0 20px;font-size:16px;font-weight:600;color:#e4e4e7;">Quick Start (2 minutes)</h3>
-<p style="margin:0 0 16px;font-size:15px;color:#a1a1aa;line-height:1.6;">
-<strong style="color:#d4d4d8;">1.</strong> Combine your keys: <code style="background:#18181b;padding:4px 8px;border-radius:6px;border:1px solid #27272a;font-size:13px;color:#e4e4e7;">aw_live_...:sk-proj-...</code><br>
-<strong style="color:#d4d4d8;">2.</strong> Change your base URL to <code style="background:#18181b;padding:4px 8px;border-radius:6px;border:1px solid #27272a;font-size:13px;color:#e4e4e7;">http://localhost:8787/v1/proxy/openai</code><br>
-<strong style="color:#d4d4d8;">3.</strong> Ship with confidence. Your budget is enforced.
-</p>
-<a href="http://localhost:8787/v1/dashboard" style="display:inline-block;background:linear-gradient(135deg,#3b82f6,#6366f1);color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 32px;border-radius:8px;">Open Dashboard →</a>
-</td></tr>
-<tr><td style="padding:0 40px 40px;">
-<p style="margin:0;font-size:13px;color:#52525b;">Questions? Reply to this email — we read every one.</p>
-</td></tr>
-</table>
-</td></tr></table>
-</body></html>`;
 }

@@ -10,9 +10,19 @@ Thank you for your interest in contributing to AgentWatch! This document provide
 
 ## Getting Started
 
+### Quick Start
+
+The fastest way to get started:
+
+```bash
+git clone https://github.com/AgentWatch-dev/agentwatch.git
+cd agentwatch
+./scripts/setup.sh
+```
+
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20+
 - npm
 - A Cloudflare account (for deployment)
 - A Supabase account (for database)
@@ -96,11 +106,38 @@ Include:
 - Proposed solution
 - Alternatives considered
 
+## Testing the Dashboard
+
+The dashboard is a static asset bundle served by the Worker. To test changes:
+
+1. Build the dashboard: `npm run predeploy`
+2. Start the dev server: `npm run dev`
+3. Open http://localhost:8787 in your browser
+4. Log in with the `ADMIN_SECRET` set in `.dev.vars`
+
+For frontend-only changes, edit files in `website/` and rebuild. The
+dashboard reads configuration from the Worker API, so a running dev
+server is required.
+
 ## Architecture
 
 Before contributing, read:
-- [ARCHITECTURE.md](docs/architecture.md) — System design
+- [ARCHITECTURE.md](docs/architecture.md) — System design and request flow
 - [README.md](README.md) — Overview and quick start
+
+## Good First Issues
+
+Looking for a way to contribute? Here are some starter tasks:
+
+- **Add provider pricing data** — Update `scripts/generate-pricing.cjs` with new model pricing from provider documentation
+- **Improve error messages** — Make 402/403 responses include clearer guidance in the response body
+- **Add example tests** — Write integration tests for examples in `examples/` using the test infrastructure in `tests/`
+- **Documentation improvements** — Fix typos, add missing API examples, or clarify setup steps in `docs/`
+- **Dashboard accessibility** — Improve keyboard navigation and screen reader support in the dashboard
+
+## Maintainers
+
+- AgentWatch Core Team — `maintainers@agent-watch.dev`
 
 ## Security
 

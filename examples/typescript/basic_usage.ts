@@ -17,12 +17,12 @@
 
 import OpenAI from "openai";
 
-// Combine your AgentWatch token with your OpenAI key
-const AGENTWATCH_KEY = "aw_live_your_token";
-const OPENAI_KEY = "sk-proj-your-key";
+const AGENTWATCH_KEY = process.env.AGENTWATCH_KEY || "aw_live_your_token";
+const OPENAI_KEY = process.env.OPENAI_KEY || "sk-proj-your-key";
+const AGENTWATCH_URL = process.env.AGENTWATCH_URL || "http://localhost:8787";
 
 const client = new OpenAI({
-  baseURL: "http://localhost:8787/v1/proxy/openai",
+  baseURL: `${AGENTWATCH_URL}/v1/proxy/openai`,
   apiKey: `${AGENTWATCH_KEY}:${OPENAI_KEY}`,
 });
 

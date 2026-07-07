@@ -577,7 +577,7 @@ export const dashboardHtml = `<!DOCTYPE html>
                 + '<span style="color:var(--text-muted);"># Python</span><br>'
                 + '<span style="color:var(--accent);">from</span> openai <span style="color:var(--accent);">import</span> OpenAI<br>'
                 + 'client = OpenAI(<br>'
-                + '&nbsp;&nbsp;base_url=<span style="color:var(--green);">"http://localhost:8787/v1/proxy/openai"</span>,<br>'
+                + '&nbsp;&nbsp;base_url=<span style="color:var(--green);">"'" + window.location.origin + "/v1/proxy/openai" + "'"</span>,<br>'
                 + '&nbsp;&nbsp;api_key=<span style="color:var(--green);">"' + esc(maskedKey) + ':sk-..."</span><br>'
                 + ')</div>'
                 + '</td></tr>';
@@ -1050,63 +1050,6 @@ export const dashboardHtml = `<!DOCTYPE html>
         rows.forEach(r => tbody.appendChild(r));
     }
 
-    let dashboardAppliedPromo = null;
-
-    async function checkDashboardPromo() {
-        try {
-            const resp = await fetch('/v1/promos/status');
-            const data = await resp.json();
-            if (data.enabled) {
-                const banner = document.getElementById('dashboardPromoBanner');
-                if (banner) banner.classList.remove('hidden');
-                const input = document.getElementById('dashboardPromoInput');
-                if (input) input.classList.remove('hidden');
-            }
-        } catch (err) {}
-    }
-
-    async function applyDashboardPromo() {
-        const input = document.getElementById('dashboardPromoCodeInput');
-        const btn = document.getElementById('dashboardPromoApplyBtn');
-        const errorEl = document.getElementById('dashboardPromoError');
-        const code = input.value.trim();
-        if (!code) return;
-
-        btn.textContent = 'Validating...';
-        btn.disabled = true;
-        errorEl.classList.add('hidden');
-
-        try {
-            const resp = await fetch('/v1/promos/validate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code })
-            });
-            const data = await resp.json();
-
-            if (data.valid) {
-                dashboardAppliedPromo = data;
-                document.getElementById('dashboardPromoPrice').classList.remove('hidden');
-                document.getElementById('dashboardDiscountedPrice').classList.remove('hidden');
-                document.getElementById('dashboardNormalPrice').classList.add('hidden');
-                document.getElementById('dashboardDiscountedPrice').textContent = '$' + data.discountedPrice.toFixed(2);
-                document.getElementById('dashboardPromoPrice').textContent = '$' + (parseInt(data.discount) === 50 ? '99' : '99');
-                errorEl.classList.add('hidden');
-            } else {
-                const errorMsg = typeof data.error === 'object' ? (data.error.message || 'Invalid promo code') : (data.error || 'Invalid promo code');
-                errorEl.textContent = errorMsg;
-                errorEl.classList.remove('hidden');
-                dashboardAppliedPromo = null;
-            }
-        } catch (err) {
-            errorEl.textContent = 'Failed to validate promo code';
-            errorEl.classList.remove('hidden');
-        } finally {
-            btn.textContent = 'Apply';
-            btn.disabled = false;
-        }
-    }
-
     async function loadPlan() {
         try {
             const planData = await tryApi('/dashboard/plan');
@@ -1173,7 +1116,7 @@ export const dashboardHtml = `<!DOCTYPE html>
                             <p class="text-[13px] text-[var(--text-dim)] mb-6">You are on the highest tier. For support or custom configuration, contact your account manager.</p>
                             
                             <div class="flex flex-col gap-3">
-                                <button onclick="window.location.href='mailto:hello@localhost'" class="w-full py-3 rounded-lg text-sm font-bold transition-all" style="background:var(--surface-2);color:var(--text);">
+                                <button onclick="window.location.href='mailto:support@agentwatch.dev'" class="w-full py-3 rounded-lg text-sm font-bold transition-all" style="background:var(--surface-2);color:var(--text);">
                                     Contact Support
                                 </button>
                             </div>
@@ -1185,11 +1128,6 @@ export const dashboardHtml = `<!DOCTYPE html>
                     const priceEl = document.querySelector('#billingUpgradeContainer .text-2xl.font-bold');
                                         const requestLimitEl = document.querySelector('#billingUpgradeContainer .space-y-2 li:first-child');
                                     }
-
-                // Show promo banner if enabled and user is on free plan
-                if (planData.plan === 'free') {
-                    checkDashboardPromo();
-                }
 
                 const usageEl = document.getElementById('usageCount');
                 const isUnlimited = planData.requestLimit === null || planData.requestLimit === undefined || planData.requestLimit === Infinity;
@@ -1204,7 +1142,7 @@ export const dashboardHtml = `<!DOCTYPE html>
                     barEl.style.width = '100%';
                 }
             }
-        } catch {}
+        } catch (e) { /* ignore */}
     }
 
     async function loadEnterprise() {
@@ -1227,7 +1165,7 @@ export const dashboardHtml = `<!DOCTYPE html>
                         '<div class="flex justify-between text-[12px]"><span class="text-[var(--text-dim)]">Downtime</span><span style="color:' + (isBreached ? 'var(--red)' : 'var(--green)') + ';">' + downtime + ' min</span></div>';
                 }
             }
-        } catch {}
+        } catch (e) { /* ignore */}
         try {
             var residencyData = await tryApi('/residency');
             if (residencyData) {
@@ -1237,7 +1175,7 @@ export const dashboardHtml = `<!DOCTYPE html>
                         '<div class="flex justify-between text-[12px]"><span class="text-[var(--text-dim)]">Enforced</span><span style="color:' + (residencyData.data_residency_enforced ? 'var(--green)' : 'var(--text-muted)') + ';">' + (residencyData.data_residency_enforced ? 'Yes' : 'No') + '</span></div>';
                 }
             }
-        } catch {}
+        } catch (e) { /* ignore */}
         try {
             var ssoData = await tryApi('/dashboard/sso-status');
             var ssoEl = document.getElementById('ssoStatus');
@@ -1251,7 +1189,7 @@ export const dashboardHtml = `<!DOCTYPE html>
                         '<div class="text-[11px] text-[var(--text-muted)]">Configure your Identity Provider (Okta, Azure AD, etc.) with the SP metadata URL.</div>';
                 }
             }
-        } catch {}
+        } catch (e) { /* ignore */}
     }
 
     async function downloadSoc2(event) {
@@ -1289,128 +1227,15 @@ export const dashboardHtml = `<!DOCTYPE html>
         }
     }
 
-    async function loadPaymentHistory() {
-        try {
-            const data = await tryApi('/dashboard/payments');
-            if (data && data.payments && data.payments.length > 0) {
-                const container = document.getElementById('paymentHistoryContent');
-                if (container) {
-                    container.className = 'flex flex-col gap-2';
-                    container.innerHTML = data.payments.map(function(p) {
-                        return '<div class="flex justify-between items-center py-2 border-b border-[var(--border)]">'
-                            + '<div>'
-                            + '<p class="text-[13px] text-[var(--text)]">' + esc(p.promo_code || 'Payment') + '</p>'
-                            + '<p class="text-[11px] text-[var(--text-muted)]">' + new Date(p.created_at).toLocaleDateString() + '</p>'
-                            + '</div>'
-                            + '<span class="text-[13px] font-mono text-[var(--accent)]">$' + (p.discount_amount || 0) + '</span>'
-                            + '</div>';
-                    }).join('');
-                }
-            }
-        } catch (e) { /* ignore */ }
-    }
-
     async function refreshAll() {
         if (!AUTH_KEY) return;
         document.getElementById('lastUpdated').textContent = 'Refreshing...';
         try {
             await loadPlan();
-            await Promise.allSettled([loadSummary(), loadSessions(), loadPolicies(), loadAnomalies(), loadTrend(), loadProviders(), loadTeams(), loadBudgets(), loadExplicitTeams(), loadKeys(), loadAuditLogs(), loadSettings(), loadAdvancedAnalytics(), loadEnterprise(), loadPaymentHistory()]);
+            await Promise.allSettled([loadSummary(), loadSessions(), loadPolicies(), loadAnomalies(), loadTrend(), loadProviders(), loadTeams(), loadBudgets(), loadExplicitTeams(), loadKeys(), loadAuditLogs(), loadSettings(), loadAdvancedAnalytics(), loadEnterprise()]);
             document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString();
         } catch (e) {
             document.getElementById('lastUpdated').textContent = 'Refresh failed';
-        }
-    }
-
-    async function payWithRazorpay() {
-        // Load Razorpay dynamically if not already loaded
-        if (!window.Razorpay) {
-            await new Promise((resolve, reject) => {
-                const script = document.createElement('script');
-                script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-                script.onload = resolve;
-                script.onerror = reject;
-                document.head.appendChild(script);
-            });
-        }
-
-        const amountUsd = 99; // Hardcoded for Pro Plan
-        
-        const statusEl = document.getElementById('paymentStatus');
-        statusEl.textContent = 'Initializing payment...';
-        statusEl.style.color = 'var(--text-dim)';
-        
-        // Use USD (cents) — discount applied by backend if promo code provided
-        const amountCents = amountUsd * 100;
-        let description = 'Pro Subscription ($99/mo)';
-        if (dashboardAppliedPromo) {
-            description = 'Pro Subscription - 50% OFF first month ($49.50/mo)';
-        }
-
-        try {
-            const body = { amount: amountCents, currency: 'USD' };
-            if (dashboardAppliedPromo) body.promo_code = dashboardAppliedPromo.code || 'PH50';
-
-            const resp = await fetch('/v1/payments/create-order', {
-                method: 'POST',
-                headers: {
-                    'Authorization': 'Bearer ' + AUTH_KEY,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(body)
-            });
-
-            if (!resp.ok) throw new Error(await resp.text());
-            const data = await resp.json();
-
-            const options = {
-                "key": data.key_id,
-                "amount": data.amount,
-                "currency": data.currency,
-                "name": "AgentWatch",
-                "description": description,
-                "order_id": data.order_id,
-                "handler": async function (response) {
-                    statusEl.textContent = 'Verifying payment...';
-                    try {
-                        const verifyResp = await fetch('/v1/payments/verify', {
-                            method: 'POST',
-                            headers: {
-                                'Authorization': 'Bearer ' + AUTH_KEY,
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                razorpay_payment_id: response.razorpay_payment_id,
-                                razorpay_order_id: response.razorpay_order_id,
-                                razorpay_signature: response.razorpay_signature
-                            })
-                        });
-                        
-                        if (!verifyResp.ok) throw new Error(await verifyResp.text());
-                        
-                        statusEl.textContent = 'Payment successful! Credits added.';
-                        statusEl.style.color = 'var(--green)';
-                    } catch (err) {
-                        statusEl.textContent = 'Payment verification failed: ' + err.message;
-                        statusEl.style.color = 'var(--red)';
-                    }
-                },
-                "theme": {
-                    "color": "#58A6FF"
-                }
-            };
-            
-            const rzp = new window.Razorpay(options);
-            rzp.on('payment.failed', function (response){
-                statusEl.textContent = 'Payment failed: ' + response.error.description;
-                statusEl.style.color = 'var(--red)';
-            });
-            rzp.open();
-            statusEl.textContent = 'Waiting for payment...';
-
-        } catch (err) {
-            statusEl.textContent = 'Failed to create order: ' + err.message;
-            statusEl.style.color = 'var(--red)';
         }
     }
 
@@ -1595,11 +1420,6 @@ export const dashboardHtml = `<!DOCTYPE html>
 
     if (AUTH_KEY) {
         refreshAll();
-        // Set up promo apply button
-        const promoApplyBtn = document.getElementById('dashboardPromoApplyBtn');
-        if (promoApplyBtn) {
-            promoApplyBtn.addEventListener('click', applyDashboardPromo);
-        }
     }
     setInterval(refreshAll, 60000);
     </script>

@@ -59,6 +59,14 @@ CREATE INDEX IF NOT EXISTS idx_logs_session_id ON public.llm_request_logs (sessi
 
 ALTER TABLE public.llm_request_logs enable row level security;
 
+-- RLS policy: restrict access to service_role only.
+-- llm_request_logs contains sensitive telemetry (tokens, latencies, errors, risks)
+-- and must not be readable by anonymous or authenticated users.
+-- Tenant isolation is enforced at the application layer by the Edge Proxy.
+CREATE POLICY service_role_only ON public.llm_request_logs
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
 -- ===========================================================================
 -- developer_keys — API key management
 -- ===========================================================================

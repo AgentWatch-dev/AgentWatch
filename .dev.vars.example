@@ -23,6 +23,21 @@ XAI_API_KEY="<YOUR_XAI_API_KEY>"
 GEMINI_API_KEY="<YOUR_GEMINI_API_KEY>"
 
 
+# Site URL (used in emails and redirects — defaults to http://localhost:8787)
+# SITE_URL="https://your-production-url.com"
+
 # Payment & Notifications
 SLACK_WEBHOOK_URL="<YOUR_SLACK_WEBHOOK_URL>"
 RESEND_API_KEY="re_<YOUR_RESEND_API_KEY>"
+
+# SSO / SAML (set to "true" to enable SAML SSO)
+SSO_ENABLED=false
+
+# CORS (set to your domain for CORS, defaults to *)
+CORS_ALLOWED_ORIGIN=
+
+# Timeout for Supabase log writes (ms)
+LOG_WRITE_TIMEOUT_MS=5000
+
+# Email for contact form submissions
+CONTACT_EMAIL=

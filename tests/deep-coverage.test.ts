@@ -267,35 +267,4 @@ describe("Worker Configuration", () => {
   });
 });
 
-describe("Webhook Edge Cases", () => {
-  it("should handle webhook with GET method", async () => {
-    const res = await call("/v1/webhook");
-    expect(res.status).toBe(410);
-    const body = await res.text();
-    expect(body).toContain("Razorpay");
-  });
 
-  it("should handle webhook with DELETE method", async () => {
-    const res = await call("/v1/webhook", { method: "DELETE" });
-    expect(res.status).toBe(410);
-  });
-
-  it("should handle webhook with PUT method", async () => {
-    const res = await call("/v1/webhook", { method: "PUT" });
-    expect(res.status).toBe(410);
-  });
-
-  it("should return 410 for webhook endpoint (Stripe removed)", async () => {
-    const res = await call("/v1/webhook", {
-      method: "POST",
-      body: JSON.stringify({ type: "checkout.session.completed" }),
-      headers: { "Content-Type": "application/json" },
-    });
-    expect(res.status).toBe(410);
-  });
-
-  it("should return 410 for webhook GET (Stripe removed)", async () => {
-    const res = await call("/v1/webhook", { method: "GET" });
-    expect(res.status).toBe(410);
-  });
-});

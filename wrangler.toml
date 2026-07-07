@@ -31,6 +31,10 @@ class_name = "SessionTracker"
 name = "TENANT_BALANCE"
 class_name = "TenantBalance"
 
+[[durable_objects.bindings]]
+name = "BUDGET_TRACKER"
+class_name = "BudgetTracker"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["SessionTracker"]
@@ -38,6 +42,10 @@ new_sqlite_classes = ["SessionTracker"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["TenantBalance"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["BudgetTracker"]
 
 [[unsafe.bindings]]
 name = "RATE_LIMITER"

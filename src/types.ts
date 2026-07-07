@@ -3,9 +3,10 @@ export type Provider = "openai" | "anthropic" | "groq" | "xai" | "gemini" | "azu
 export interface Env {
   SESSION_TRACKER: DurableObjectNamespace<import("./session_do").SessionTracker>;
   TENANT_BALANCE: DurableObjectNamespace<import("./balance_do").TenantBalance>;
+  BUDGET_TRACKER: DurableObjectNamespace<import("./budget_do").BudgetTracker>;
   RATE_LIMITER: any; // Cloudflare Native RateLimiter binding type
   KV: KVNamespace;
-  ASSETS: { fetch(url: URL | string, init?: RequestInit): Promise<Response> };
+  ASSETS: { fetch(url: URL | string | Request, init?: RequestInit): Promise<Response> };
   OPENAI_BASE_URL?: string;
   ANTHROPIC_BASE_URL?: string;
   ANTHROPIC_VERSION?: string;
@@ -24,5 +25,8 @@ export interface Env {
   CORS_ALLOWED_ORIGIN?: string;
   SLACK_WEBHOOK_URL?: string;
   TELEMETRY_QUEUE?: Queue<any>;
-              ADMIN_SECRET?: string;
+  ADMIN_SECRET?: string;
+  CONTACT_EMAIL?: string;
+  SSO_ENABLED?: string;
+  SITE_URL?: string;
 }

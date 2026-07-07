@@ -135,7 +135,7 @@ describe("Authentication & Security", () => {
       const noCorsEnv = makeEnv({ CORS_ALLOWED_ORIGIN: undefined });
       const req = makeRequest("GET", "/v1/budget-check?session_id=s1&limit_usd=1", { token: "aw_test_token_1" });
       const res = await worker.fetch(req, noCorsEnv, ctx);
-      expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
     });
   });
 });

@@ -1,11 +1,16 @@
 export type RiskTag =
   | "PII_EMAIL"
   | "PII_SSN"
+  | "PII_PHONE"
   | "FINANCIAL_CREDIT_CARD"
   | "SECRET_AWS_ACCESS_KEY"
+  | "SECRET_AZURE_KEY"
   | "SECRET_STRIPE"
   | "SECRET_GITHUB"
-  | "SECRET_JWT";
+  | "SECRET_SLACK_TOKEN"
+  | "SECRET_JWT"
+  | "SECRET_SSH_KEY"
+  | "SECRET_DB_CONNECTION";
 
 const MAX_SCAN_CHARS = 256 * 1024;
 const EDGE_SCAN_CHARS = MAX_SCAN_CHARS / 2;
@@ -13,9 +18,14 @@ const MAX_STRUCTURED_CANDIDATES = 256;
 
 const EMAIL_RE = /\b[A-Z0-9._%+-]{1,64}@[A-Z0-9.-]{1,253}\.[A-Z]{2,63}\b/i;
 const SSN_RE = /\b(?!000|666|9\d{2})\d{3}[- ]?(?!00)\d{2}[- ]?(?!0000)\d{4}\b/;
+const PHONE_RE = /\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/;
 const AWS_ACCESS_KEY_RE = /\b(?:AKIA|ASIA|AIDA|AROA|AGPA|ANPA)[A-Z0-9]{16}\b/;
+const AZURE_KEY_RE = /\b[A-Za-z0-9]{40}\b(?=.*(?:azure|api.?key|subscription))/i;
 const STRIPE_SECRET_KEY_RE = /\bsk_(?:live|test)_[A-Za-z0-9]{16,}\b/;
 const GITHUB_TOKEN_RE = /\b(?:gh[pousr]_[A-Za-z0-9_]{36,255}|github_pat_[A-Za-z0-9_]{22,255})\b/;
+const SLACK_TOKEN_RE = /\bxox[bpsar]-[0-9]{10,}-[a-zA-Z0-9-]+/;
+const SSH_KEY_RE = /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/;
+const DB_CONNECTION_RE = /(?:postgresql|mongodb|mysql|redis):\/\/[^\s]{10,}/i;
 const CREDIT_CARD_CANDIDATE_RE = /(?=(?:^|[^\d])((?:\d[ -]?){13,19})(?!\d))/g;
 const JWT_CANDIDATE_RE = /\b[A-Za-z0-9_-]{10,512}\.[A-Za-z0-9_-]{10,4096}\.[A-Za-z0-9_-]{16,1024}\b/g;
 
@@ -24,31 +34,46 @@ const JWT_SIGNATURE_MIN_ENTROPY = 3.5;
 const TAG_ORDER: RiskTag[] = [
   "PII_EMAIL",
   "PII_SSN",
+  "PII_PHONE",
   "FINANCIAL_CREDIT_CARD",
   "SECRET_AWS_ACCESS_KEY",
+  "SECRET_AZURE_KEY",
   "SECRET_STRIPE",
   "SECRET_GITHUB",
+  "SECRET_SLACK_TOKEN",
   "SECRET_JWT",
+  "SECRET_SSH_KEY",
+  "SECRET_DB_CONNECTION",
 ];
 
 const enum RiskFlag {
   PiiEmail = 1 << 0,
   PiiSsn = 1 << 1,
-  FinancialCreditCard = 1 << 2,
-  SecretAwsAccessKey = 1 << 3,
-  SecretStripe = 1 << 4,
-  SecretGithub = 1 << 5,
-  SecretJwt = 1 << 6,
+  PiiPhone = 1 << 2,
+  FinancialCreditCard = 1 << 3,
+  SecretAwsAccessKey = 1 << 4,
+  SecretAzureKey = 1 << 5,
+  SecretStripe = 1 << 6,
+  SecretGithub = 1 << 7,
+  SecretSlackToken = 1 << 8,
+  SecretJwt = 1 << 9,
+  SecretSshKey = 1 << 10,
+  SecretDbConnection = 1 << 11,
 }
 
 const TAG_FLAGS: Record<RiskTag, RiskFlag> = {
   PII_EMAIL: RiskFlag.PiiEmail,
   PII_SSN: RiskFlag.PiiSsn,
+  PII_PHONE: RiskFlag.PiiPhone,
   FINANCIAL_CREDIT_CARD: RiskFlag.FinancialCreditCard,
   SECRET_AWS_ACCESS_KEY: RiskFlag.SecretAwsAccessKey,
+  SECRET_AZURE_KEY: RiskFlag.SecretAzureKey,
   SECRET_STRIPE: RiskFlag.SecretStripe,
   SECRET_GITHUB: RiskFlag.SecretGithub,
+  SECRET_SLACK_TOKEN: RiskFlag.SecretSlackToken,
   SECRET_JWT: RiskFlag.SecretJwt,
+  SECRET_SSH_KEY: RiskFlag.SecretSshKey,
+  SECRET_DB_CONNECTION: RiskFlag.SecretDbConnection,
 };
 
 export function analyzePayload(text: string): string[] {
@@ -67,12 +92,20 @@ export function analyzePayload(text: string): string[] {
     flags |= RiskFlag.PiiSsn;
   }
 
+  if (PHONE_RE.test(scanText)) {
+    flags |= RiskFlag.PiiPhone;
+  }
+
   if (hasCreditCard(scanText)) {
     flags |= RiskFlag.FinancialCreditCard;
   }
 
   if (hasAwsAccessKey(scanText)) {
     flags |= RiskFlag.SecretAwsAccessKey;
+  }
+
+  if (AZURE_KEY_RE.test(scanText)) {
+    flags |= RiskFlag.SecretAzureKey;
   }
 
   if (hasStripeSecretKey(scanText)) {
@@ -83,8 +116,20 @@ export function analyzePayload(text: string): string[] {
     flags |= RiskFlag.SecretGithub;
   }
 
+  if (SLACK_TOKEN_RE.test(scanText)) {
+    flags |= RiskFlag.SecretSlackToken;
+  }
+
   if (hasHighEntropyJwt(scanText)) {
     flags |= RiskFlag.SecretJwt;
+  }
+
+  if (SSH_KEY_RE.test(scanText)) {
+    flags |= RiskFlag.SecretSshKey;
+  }
+
+  if (DB_CONNECTION_RE.test(scanText)) {
+    flags |= RiskFlag.SecretDbConnection;
   }
 
   return TAG_ORDER.filter((tag) => (flags & TAG_FLAGS[tag]) !== 0);
@@ -279,4 +324,14 @@ function digitsOnly(value: string): string {
   }
 
   return digits;
+}
+
+export function shouldBlockOnPii(text: string, blockOnPii: boolean): { blocked: boolean; risks: string[] } {
+  if (!blockOnPii || text.length === 0) {
+    return { blocked: false, risks: [] };
+  }
+
+  const risks = analyzePayload(text);
+  const hasPiiOrSecret = risks.length > 0;
+  return { blocked: hasPiiOrSecret, risks };
 }

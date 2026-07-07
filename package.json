@@ -18,7 +18,8 @@
   },
   "dependencies": {
     "aws4fetch": "^1.0.20",
-    "js-tiktoken": "^1.0.20"
+    "js-tiktoken": "^1.0.20",
+    "xml-crypto": "~6.1.2"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.15",

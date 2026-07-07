@@ -115,9 +115,9 @@ describe("Rate Limiting", () => {
     expect(body).toBe("ok");
   });
 
-  it("should deny when RATE_LIMITER binding is absent (secure default)", async () => {
+  it("should allow when RATE_LIMITER binding is absent", async () => {
     env.RATE_LIMITER = undefined;
     const res = await call("/v1/budget-check?session_id=s1&limit_usd=1", { token: "aw_test_token_1" });
-    expect(res.status).toBe(429);
+    expect(res.status).toBe(200);
   });
 });

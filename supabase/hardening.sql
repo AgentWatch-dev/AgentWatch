@@ -97,11 +97,10 @@ CREATE POLICY service_role_only ON public.report_dispatches
   WITH CHECK (auth.role() = 'service_role');
 
 -- #20: RLS documentation — llm_request_logs
--- RLS is enabled intentionally. Only the service_role key (used by the Edge Proxy)
--- can read/write to this table. No RLS policies are defined because all access
--- goes through the Cloudflare Worker which authenticates tenants at the application layer.
+-- service_role_only policy defined in schema.sql.
+-- All access goes through the Cloudflare Worker which authenticates tenants at the application layer.
 COMMENT ON TABLE public.llm_request_logs IS
-  'Telemetry logs from AgentWatch edge proxy. RLS enabled; access restricted to service_role only. Tenant isolation enforced at the application layer.';
+  'Telemetry logs from AgentWatch edge proxy. RLS enabled; service_role_only policy enforces access control. Tenant isolation enforced at the application layer.';
 
 -- #21: Data retention policy — auto-purge logs older than 90 days
 CREATE OR REPLACE FUNCTION public.purge_old_logs()

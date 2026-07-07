@@ -6,7 +6,7 @@ export class SessionTracker extends DurableObject {
    * Uses blockConcurrencyWhile to ensure the read-modify-write is atomic —
    * no two concurrent calls can interleave and lose an increment.
    */
-  async incrementTokensAndUsd(tokens: number, usd: number): Promise<{ tokens: number, usd: number, runaway_detected: boolean, request_count: number }> {
+  async incrementTokensAndUsd(tokens: number, usd: number, maxRequests: number = 50): Promise<{ tokens: number, usd: number, runaway_detected: boolean, request_count: number }> {
     // Validate inputs — reject negative values
     if (tokens < 0 || usd < 0) {
       throw new Error("Invalid token/usd values: must be non-negative");
@@ -21,9 +21,7 @@ export class SessionTracker extends DurableObject {
       currentUsd += usd;
       requestCount += 1;
 
-      // Heuristic: If an agent makes more than 50 requests in a single session without
-      // being reset, we flag it as a runaway quadratic loop.
-      const runaway_detected = requestCount > 50;
+      const runaway_detected = requestCount > maxRequests;
       
       // Batch writes
       await this.ctx.storage.put({

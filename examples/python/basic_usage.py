@@ -15,14 +15,16 @@ Environment:
     export OPENAI_KEY="sk-proj-your-key"
 """
 
+import os
+
 from openai import OpenAI
 
-# Combine your AgentWatch token with your OpenAI key
-AGENTWATCH_KEY = "aw_live_your_token"
-OPENAI_KEY = "sk-proj-your-key"
+AGENTWATCH_KEY = os.environ.get("AGENTWATCH_KEY", "aw_live_your_token")
+OPENAI_KEY = os.environ.get("OPENAI_KEY", "sk-proj-your-key")
+AGENTWATCH_URL = os.environ.get("AGENTWATCH_URL", "http://localhost:8787")
 
 client = OpenAI(
-    base_url="http://localhost:8787/v1/proxy/openai",
+    base_url=f"{AGENTWATCH_URL}/v1/proxy/openai",
     api_key=f"{AGENTWATCH_KEY}:{OPENAI_KEY}",
 )
 

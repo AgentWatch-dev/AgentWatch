@@ -200,7 +200,7 @@ export const loginHtml = `<!DOCTYPE html>
         <div class="footer-links">
             <a href="/">Home</a>
             <span>·</span>
-            <a href="http://localhost:8787/docs">Docs</a>
+            <a href="/docs">Docs</a>
         </div>
     </div>
 
