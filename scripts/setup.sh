@@ -50,12 +50,12 @@ echo "  npm install ✓"
 # --- 4. Create KV namespace if needed ---
 echo ""
 echo "[4/6] Checking Cloudflare KV namespace..."
-KV_ID=$(grep -oP 'id = "\K[^"]+' wrangler.toml 2>/dev/null || echo "")
+KV_ID=$(sed -n 's/.*id = "\([^"]*\)".*/\1/p' wrangler.toml 2>/dev/null | head -1)
 if [ -z "$KV_ID" ] || [ "$KV_ID" = "<YOUR_KV_NAMESPACE_ID>" ]; then
   echo "  No KV namespace configured. Creating one..."
   if command -v npx &>/dev/null; then
     KV_OUTPUT=$(npx wrangler kv namespace create "KV" 2>&1 || true)
-    NEW_KV_ID=$(echo "$KV_OUTPUT" | grep -oP 'id = "\K[^"]+' || echo "")
+    NEW_KV_ID=$(echo "$KV_OUTPUT" | sed -n 's/.*id = "\([^"]*\)".*/\1/p' | head -1)
     if [ -n "$NEW_KV_ID" ]; then
       sed -i.bak "s/id = \"<YOUR_KV_NAMESPACE_ID>\"/id = \"$NEW_KV_ID\"/" wrangler.toml
       rm -f wrangler.toml.bak

@@ -32,7 +32,7 @@ This Code of Conduct applies within all community spaces, and also applies when 
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the project maintainers at security@agent-watch.dev.
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the project maintainers via [GitHub issues](https://github.com/agentwatch/agentwatch/issues).
 
 All complaints will be reviewed and investigated promptly and fairly.
 

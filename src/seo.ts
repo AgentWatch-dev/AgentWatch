@@ -1,3 +1,4 @@
+// TODO: Set SITE_URL in production environment for correct SEO URLs
 export const robotsTxt = `User-agent: *
 Allow: /
 Sitemap: https://example.com/sitemap.xml`;
@@ -5,7 +6,7 @@ Sitemap: https://example.com/sitemap.xml`;
 export const sitemapXml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://example.com/</loc>
+    <loc>https://example.com/</loc> <!-- TODO: Set SITE_URL in production -->
     <lastmod>${new Date().toISOString()}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>

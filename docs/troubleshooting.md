@@ -102,5 +102,5 @@ First requests may be slower due to Worker cold start (V8 compilation). Subseque
 
 ## Getting Help
 
-- **Email:** hello@localhost
+- **Email:** Use the contact form at `/v1/contact`
 - **Health Check:** `curl http://localhost:8787/healthz`

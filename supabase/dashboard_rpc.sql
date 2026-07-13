@@ -568,3 +568,40 @@ end;
 $$;
 
 grant execute on function public.delete_team(text, text) to service_role;
+
+-- 11. Request volume by hour (last 24 hours)
+-- Parameter matches callRpc: tenant_id_param
+CREATE OR REPLACE FUNCTION public.get_request_volume_by_hour(tenant_id_param TEXT)
+RETURNS JSONB
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = public
+AS $$
+  WITH hourly AS (
+    SELECT
+      date_trunc('hour', request_started_at) AS hour,
+      COUNT(*) AS count
+    FROM public.llm_request_logs
+    WHERE tenant_id = tenant_id_param
+      AND request_started_at >= NOW() - INTERVAL '24 hours'
+    GROUP BY date_trunc('hour', request_started_at)
+  ),
+  full_hours AS (
+    SELECT generate_series(
+      date_trunc('hour', NOW() - INTERVAL '23 hours'),
+      date_trunc('hour', NOW()),
+      INTERVAL '1 hour'
+    ) AS hour
+  )
+  SELECT COALESCE(jsonb_agg(
+    jsonb_build_object(
+      'hour', TO_CHAR(fh.hour, 'YYYY-MM-DD"T"HH24:00:00Z'),
+      'count', COALESCE(h.count, 0)
+    ) ORDER BY fh.hour
+  ), '[]'::jsonb)
+  FROM full_hours fh
+  LEFT JOIN hourly h ON h.hour = fh.hour;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_request_volume_by_hour(text) TO service_role;

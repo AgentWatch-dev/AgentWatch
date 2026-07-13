@@ -1538,7 +1538,7 @@ const worker: ExportedHandler<Env> = {
       // Fallback: if Supabase not configured, return mock data
       const volume = result || Array.from({ length: 24 }, (_, i) => ({
         hour: new Date(Date.now() - (23 - i) * 3600000).toISOString().slice(0, 13) + ":00",
-        count: Math.floor(Math.random() * 100)
+        count: Math.floor(Math.random() * 100) // Mock data: random values when Supabase is not configured
       }));
 
       return Response.json({ hourly: volume }, { status: 200, headers: corsHeaders(env) });
@@ -2032,7 +2032,7 @@ const worker: ExportedHandler<Env> = {
         requestLimit: limit,
         requestsRemaining: limit === Infinity ? -1 : Math.max(0, limit - requestCount),
         pricing: {
-          proPriceUsd: 0,
+          proPriceUsd: 99,
           proRequestLimit: 500000,
           freeRequestLimit: 50000,
         },

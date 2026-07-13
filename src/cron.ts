@@ -217,7 +217,7 @@ export async function handleScheduled(
                     <table border="0" cellpadding="0" cellspacing="0" width="100%">
                       <tr>
                         <td align="center">
-                          <a href="https://agent-watch.dev/dashboard" style="display: inline-block; background: linear-gradient(135deg, #3b82f6, #6366f1); color: #ffffff; font-size: 15px; font-weight: 600; text-decoration: none; padding: 14px 32px; border-radius: 8px; box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4); border: 1px solid #3b82f6;">Open Dashboard</a>
+                          <a href="${(env.SITE_URL || 'http://localhost:8787')}/dashboard" style="display: inline-block; background: linear-gradient(135deg, #3b82f6, #6366f1); color: #ffffff; font-size: 15px; font-weight: 600; text-decoration: none; padding: 14px 32px; border-radius: 8px; box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4); border: 1px solid #3b82f6;">Open Dashboard</a>
                         </td>
                       </tr>
                     </table>
@@ -248,7 +248,7 @@ export async function handleScheduled(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          from: env.REPORT_FROM_EMAIL || "AgentWatch <hello@agent-watch.dev>",
+          from: env.REPORT_FROM_EMAIL || "AgentWatch <noreply@localhost>",
           to: [email],
           subject: `AgentWatch Weekly Compliance Report — ${tenantId}`,
           html,

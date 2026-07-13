@@ -137,12 +137,12 @@ Looking for a way to contribute? Here are some starter tasks:
 
 ## Maintainers
 
-- AgentWatch Core Team — `maintainers@agent-watch.dev`
+- AgentWatch Core Team — [open an issue](https://github.com/agentwatch/agentwatch/issues)
 
 ## Security
 
 If you discover a security vulnerability, please report it responsibly:
-- Email: security@agent-watch.dev
+- Email the maintainers via [GitHub issues](https://github.com/agentwatch/agentwatch/issues) (mark as security)
 - Do NOT open a public issue for security vulnerabilities
 
 ## License

@@ -8,7 +8,7 @@ If you discover a security vulnerability in AgentWatch, please report it respons
 
 ### How to Report
 
-Email security@agent-watch.dev with:
+Email the maintainers via [GitHub issues](https://github.com/agentwatch/agentwatch/issues) (mark as security) with:
 
 1. Description of the vulnerability
 2. Steps to reproduce

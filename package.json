@@ -3,7 +3,7 @@
   "version": "1.0.1",
   "type": "module",
   "scripts": {
-    "generate:pricing": "node scripts/generate-pricing.cjs",
+    "generate:pricing": "node scripts/generate-pricing.cjs # NOTE: requires scripts/generate-pricing.cjs",
     "dev": "wrangler dev",
     "predeploy": "rm -rf assets/* && cd website && npm run build && cd .. && cp -r website/dist/* assets/",
     "deploy": "wrangler deploy",
@@ -11,10 +11,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "docs:build": "vitepress build docs",
+    "docs:build": "vitepress build docs # NOTE: requires .vitepress config",
     "format": "prettier --write .",
-    "lint": "eslint src/ --ext .ts",
-    "lint:fix": "eslint src/ --ext .ts --fix"
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix"
   },
   "dependencies": {
     "aws4fetch": "^1.0.20",

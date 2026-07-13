@@ -56,3 +56,58 @@ AS $$
 $$;
 
 GRANT EXECUTE ON FUNCTION public.get_tenant_rules(text) TO service_role;
+
+-- RPC to upsert a custom tenant rule
+CREATE OR REPLACE FUNCTION public.upsert_tenant_rule(
+  p_tenant_id TEXT,
+  p_name TEXT,
+  p_enabled BOOLEAN DEFAULT true,
+  p_priority INTEGER DEFAULT 100,
+  p_condition JSONB DEFAULT '{}'::jsonb,
+  p_action TEXT DEFAULT 'alert',
+  p_action_config JSONB DEFAULT '{}'::jsonb
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public
+AS $$
+DECLARE
+  v_id BIGINT;
+BEGIN
+  INSERT INTO public.tenant_rules (tenant_id, name, enabled, priority, "condition", action, action_config, updated_at)
+  VALUES (p_tenant_id, p_name, p_enabled, p_priority, p_condition, p_action, p_action_config, NOW())
+  RETURNING id INTO v_id;
+
+  RETURN jsonb_build_object('success', true, 'id', v_id);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.upsert_tenant_rule(text, text, boolean, integer, jsonb, text, jsonb) TO service_role;
+
+-- RPC to delete a custom tenant rule
+CREATE OR REPLACE FUNCTION public.delete_tenant_rule(
+  p_tenant_id TEXT,
+  p_rule_id BIGINT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public
+AS $$
+DECLARE
+  v_deleted_id BIGINT;
+BEGIN
+  DELETE FROM public.tenant_rules
+  WHERE id = p_rule_id AND tenant_id = p_tenant_id
+  RETURNING id INTO v_deleted_id;
+
+  IF v_deleted_id IS NULL THEN
+    RAISE EXCEPTION 'Rule not found or access denied';
+  END IF;
+
+  RETURN jsonb_build_object('success', true);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.delete_tenant_rule(text, bigint) TO service_role;

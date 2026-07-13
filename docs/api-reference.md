@@ -799,8 +799,6 @@ SAML Assertion Consumer Service. Processes the SAML response from the IdP. **Ent
 
 ---
 
-## Authentication
-
 ### `POST /v1/auth/signup`
 
 Creates a new user account and provisions a tenant.

@@ -4,11 +4,11 @@ export interface Env {
   SESSION_TRACKER: DurableObjectNamespace<import("./session_do").SessionTracker>;
   TENANT_BALANCE: DurableObjectNamespace<import("./balance_do").TenantBalance>;
   BUDGET_TRACKER: DurableObjectNamespace<import("./budget_do").BudgetTracker>;
-  RATE_LIMITER: any; // Cloudflare Native RateLimiter binding type
+  RATE_LIMITER: { limit(args: { key: string }): Promise<{ success: boolean }> }; // Cloudflare Native RateLimiter binding type
   KV: KVNamespace;
   ASSETS: { fetch(url: URL | string | Request, init?: RequestInit): Promise<Response> };
-  OPENAI_BASE_URL?: string;
-  ANTHROPIC_BASE_URL?: string;
+  OPENAI_BASE_URL?: string;  // Optional: override OpenAI API base URL
+  ANTHROPIC_BASE_URL?: string;  // Optional: override Anthropic API base URL
   ANTHROPIC_VERSION?: string;
   AZURE_OPENAI_API_KEY?: string;
   AWS_ACCESS_KEY_ID?: string;

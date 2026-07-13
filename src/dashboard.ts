@@ -1116,7 +1116,7 @@ export const dashboardHtml = `<!DOCTYPE html>
                             <p class="text-[13px] text-[var(--text-dim)] mb-6">You are on the highest tier. For support or custom configuration, contact your account manager.</p>
                             
                             <div class="flex flex-col gap-3">
-                                <button onclick="window.location.href='mailto:support@agentwatch.dev'" class="w-full py-3 rounded-lg text-sm font-bold transition-all" style="background:var(--surface-2);color:var(--text);">
+                                <button onclick="window.location.href='https://github.com/agentwatch/agentwatch/issues'" class="w-full py-3 rounded-lg text-sm font-bold transition-all" style="background:var(--surface-2);color:var(--text);">
                                     Contact Support
                                 </button>
                             </div>

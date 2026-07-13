@@ -188,7 +188,7 @@ export function generateReportHtml(report: ComplianceReport): string {
 
 <div class="footer">
   <p>AgentWatch EU AI Act Compliance Report &middot; Data sourced from llm_request_logs &middot; Retention: 90 days</p>
-  <p>This report is generated automatically. For questions, contact hello@agent-watch.dev</p>
+  <p>This report is generated automatically. For questions, open an issue on GitHub.</p>
 </div>
 </body>
 </html>`;
@@ -280,7 +280,7 @@ export function generateSoc2Export(report: Soc2Export): string {
 
 <div class="footer">
   <p>AgentWatch SOC 2 Type II Evidence Export &middot; Data sourced from api_access_log &amp; auth_events</p>
-  <p>This report is generated automatically. For questions, contact hello@agent-watch.dev</p>
+  <p>This report is generated automatically. For questions, open an issue on GitHub.</p>
 </div>
 </body>
 </html>`;

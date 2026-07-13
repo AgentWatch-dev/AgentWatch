@@ -46,3 +46,36 @@ AS $$
 $$;
 
 GRANT EXECUTE ON FUNCTION public.get_tenant_residency(text) TO service_role;
+
+-- RPC to upsert tenant data residency settings
+CREATE OR REPLACE FUNCTION public.upsert_tenant_residency(
+  p_tenant_id TEXT,
+  p_region TEXT DEFAULT 'global',
+  p_data_residency_enforced BOOLEAN DEFAULT false,
+  p_eu_fallback_allowed BOOLEAN DEFAULT false
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.tenant_residency (tenant_id, region, data_residency_enforced, eu_fallback_allowed, updated_at)
+  VALUES (p_tenant_id, p_region, p_data_residency_enforced, p_eu_fallback_allowed, NOW())
+  ON CONFLICT (tenant_id)
+  DO UPDATE SET
+    region = EXCLUDED.region,
+    data_residency_enforced = EXCLUDED.data_residency_enforced,
+    eu_fallback_allowed = EXCLUDED.eu_fallback_allowed,
+    updated_at = NOW();
+
+  RETURN jsonb_build_object(
+    'tenant_id', p_tenant_id,
+    'region', p_region,
+    'data_residency_enforced', p_data_residency_enforced,
+    'eu_fallback_allowed', p_eu_fallback_allowed
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.upsert_tenant_residency(text, text, boolean, boolean) TO service_role;

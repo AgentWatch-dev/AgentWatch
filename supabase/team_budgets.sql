@@ -129,3 +129,35 @@ as $$
 $$;
 
 grant execute on function public.check_team_budgets(text) to service_role;
+
+-- RPC to upsert a team budget
+CREATE OR REPLACE FUNCTION public.upsert_team_budget(
+  p_tenant_id TEXT,
+  p_team TEXT,
+  p_monthly_budget_usd NUMERIC,
+  p_alert_threshold_pct INTEGER DEFAULT 80,
+  p_hard_stop BOOLEAN DEFAULT false
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public
+AS $$
+DECLARE
+  v_id BIGINT;
+BEGIN
+  INSERT INTO public.team_budgets (tenant_id, team, monthly_budget_usd, alert_threshold_pct, hard_stop, updated_at)
+  VALUES (p_tenant_id, p_team, p_monthly_budget_usd, p_alert_threshold_pct, p_hard_stop, NOW())
+  ON CONFLICT (tenant_id, team)
+  DO UPDATE SET
+    monthly_budget_usd = EXCLUDED.monthly_budget_usd,
+    alert_threshold_pct = EXCLUDED.alert_threshold_pct,
+    hard_stop = EXCLUDED.hard_stop,
+    updated_at = NOW()
+  RETURNING id INTO v_id;
+
+  RETURN jsonb_build_object('success', true, 'id', v_id);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.upsert_team_budget(text, text, numeric, integer, boolean) TO service_role;

@@ -84,4 +84,4 @@ curl -X POST http://localhost:8787/v1/rules \
 
 - Detection requires at least 4 iterations per session
 - One-time document processing spikes may trigger false positives (but won't block — only alert)
-- The 1.4x threshold is tuned for context-appending loops; other failure modes may have different signatures
+- The 1.2x threshold is tuned for context-appending loops; other failure modes may have different signatures
